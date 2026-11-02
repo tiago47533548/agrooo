@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "Producer": {
+      "title": "Producer",
+      "description": "Ficha territorial de productor y unidad productiva de Misiones",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "dni": { "type": "string" },
+        "fullName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "isEstablishmentHead": { "type": "boolean" },
+        "producerType": { "type": "string" },
+        "establishmentName": { "type": "string" },
+        "municipality": { "type": "string" },
+        "colonyParaje": { "type": "string" },
+        "addressReference": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "gpsAccuracyMeters": { "type": "number" },
+        "isGeolocated": { "type": "boolean" },
+        "locationMethod": { "type": "string" },
+        "locationCapturedAt": { "type": "string" },
+        "locationCapturedBy": { "type": "string" },
+        "surfaceHa": { "type": "number" },
+        "tenureType": { "type": "string" },
+        "activities": { "type": "array" },
+        "observations": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "syncStatus": { "type": "string" },
+        "version": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "createdById": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "verifiedBySupervisor": { "type": "boolean" }
+      },
+      "required": ["id", "dni", "fullName", "establishmentName", "municipality"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil de usuario institucional o técnico de campo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string" },
+        "dni": { "type": "string" },
+        "active": { "type": "boolean" },
+        "approvalStatus": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "email", "fullName", "role"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro de auditoría ministerial",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "entity": { "type": "string" },
+        "entityId": { "type": "string" },
+        "details": { "type": "string" },
+        "device": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "userId", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/producers/{producerId}": {
+      "schema": "Producer",
+      "description": "Colección de productores y relevamientos de campo provinciales"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Colección de perfiles autorizados"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Trazabilidad de operaciones de campo y administrativas"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "SIP Misiones — Sistema de Información Productiva Territorial",
+  "description": "Plataforma offline-first para el relevamiento agropecuario territorial, sincronización en campo y gestión productiva del Ministerio del Agro y la Producción de Misiones.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
