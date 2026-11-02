@@ -1,311 +1,148 @@
 import { db } from '../db/dexieDb';
-import { Producer, SyncQueueItem, QuestionnaireResponse } from '../db/schema';
+import { Producer, QuestionnaireResponse, SyncQueueItem } from '../db/schema';
+import { uploadQueueItem } from './firestoreSync';
 
 export type SyncStatusState = 'ONLINE' | 'OFFLINE' | 'PENDIENTE' | 'SINCRONIZANDO' | 'SINCRONIZADO' | 'ERROR';
-
 export interface SyncEngineStatus {
-  state: SyncStatusState;
-  isOnline: boolean;
-  pendingCount: number;
-  lastSyncedAt: string | null;
-  errorMessage: string | null;
-  supabaseConfigured: boolean;
+  state: SyncStatusState; isOnline: boolean; pendingCount: number; failedCount: number;
+  conflictCount: number; lastSyncedAt: string | null; errorMessage: string | null;
 }
-
 type StatusListener = (status: SyncEngineStatus) => void;
 
 class SyncEngine {
-  private listeners: Set<StatusListener> = new Set();
-  private isOnline: boolean = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  private isSyncing: boolean = false;
+  private listeners = new Set<StatusListener>();
+  private isOnline = typeof navigator === 'undefined' || navigator.onLine;
+  private isSyncing = false;
   private lastSyncedAt: string | null = null;
   private errorMessage: string | null = null;
-  private pingInterval: any = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private cycle: Promise<{ success: boolean; syncedCount: number; errors: string[] }> | null = null;
 
-  constructor() {
-    this.init();
-  }
-
+  constructor() { void this.init(); }
   private async init() {
-    // 1. Initial status from storage
-    try {
-      const lastSyncItem = await db.appConfig.get('last_sync_timestamp');
-      if (lastSyncItem) {
-        this.lastSyncedAt = lastSyncItem.value;
-      }
-    } catch (e) {
-      console.warn('Could not read last_sync_timestamp from local DB', e);
-    }
-
-    // 2. Network event listeners
+    const last = await db.appConfig.get('last_sync_timestamp').catch(() => undefined);
+    this.lastSyncedAt = last?.value || null;
+    await db.syncQueue.where('status').equals('syncing').modify({ status: 'pending', error: 'La app se cerró durante el envío; se reintentará.' });
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => this.handleConnectivityChange(true));
-      window.addEventListener('offline', () => this.handleConnectivityChange(false));
-
-      // Trigger sync on foreground / visibility change
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && this.isOnline) {
-          this.triggerSync();
-        }
-      });
-
-      // Background Sync API if supported
-      if ('serviceWorker' in navigator && 'SyncManager' in window) {
-        navigator.serviceWorker.ready.then((reg: any) => {
-          reg.sync?.register('sync-producers').catch(() => {});
-        }).catch(() => {});
-      }
-
-      // Heartbeat ping every 45s to verify true internet reachability
-      this.pingInterval = setInterval(() => this.checkRealConnectivity(), 45000);
+      window.addEventListener('online', () => { this.isOnline = true; void this.triggerSync(); });
+      window.addEventListener('offline', () => { this.isOnline = false; void this.notify(); });
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void this.triggerSync(); });
+      window.addEventListener('focus', () => void this.triggerSync());
+      void this.triggerSync();
     }
-
-    this.notify();
+    await this.notify();
   }
-
-  public subscribe(listener: StatusListener): () => void {
-    this.listeners.add(listener);
-    listener(this.getStatus());
-    return () => this.listeners.delete(listener);
+  subscribe(listener: StatusListener) { this.listeners.add(listener); void this.notify(); return () => this.listeners.delete(listener); }
+  getStatus(): SyncEngineStatus {
+    return { state: !this.isOnline ? 'OFFLINE' : this.isSyncing ? 'SINCRONIZANDO' : this.errorMessage ? 'ERROR' : 'ONLINE', isOnline: this.isOnline, pendingCount: 0, failedCount: 0, conflictCount: 0, lastSyncedAt: this.lastSyncedAt, errorMessage: this.errorMessage };
   }
+  async getPendingCount() { return db.syncQueue.where('status').equals('pending').count().catch(() => 0); }
 
-  public getStatus(): SyncEngineStatus {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const isConfigured = Boolean(supabaseUrl && supabaseUrl !== 'https://your-project.supabase.co');
-
-    let state: SyncStatusState = 'ONLINE';
-    if (!this.isOnline) {
-      state = 'OFFLINE';
-    } else if (this.isSyncing) {
-      state = 'SINCRONIZANDO';
-    } else if (this.errorMessage) {
-      state = 'ERROR';
-    }
-
-    return {
-      state,
-      isOnline: this.isOnline,
-      pendingCount: 0, // Will be enriched dynamically
-      lastSyncedAt: this.lastSyncedAt,
-      errorMessage: this.errorMessage,
-      supabaseConfigured: isConfigured
-    };
-  }
-
-  public async getPendingCount(): Promise<number> {
-    try {
-      return await db.syncQueue.where('status').equals('pending').count();
-    } catch {
-      return 0;
-    }
-  }
-
-  private async handleConnectivityChange(online: boolean) {
-    this.isOnline = online;
-    if (online) {
-      await this.checkRealConnectivity();
-      this.triggerSync();
-    } else {
-      this.notify();
-    }
-  }
-
-  private async checkRealConnectivity(): Promise<boolean> {
-    if (!navigator.onLine) {
-      this.isOnline = false;
-      this.notify();
-      return false;
-    }
-
-    try {
-      // Lightweight HTTP ping
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch('/favicon.ico', { 
-        method: 'HEAD', 
-        cache: 'no-store', 
-        signal: controller.signal 
-      });
-      clearTimeout(timeoutId);
-      this.isOnline = res.ok || res.status < 500;
-    } catch {
-      // Could be truly offline
-      this.isOnline = false;
-    }
-    this.notify();
-    return this.isOnline;
-  }
-
-  /**
-   * Enqueue a new operation into the local IndexedDB sync queue
-   */
-  public async enqueue(
-    table: 'producers' | 'questionnaire_responses' | 'activities',
-    action: 'insert' | 'update' | 'delete',
-    recordId: string,
-    payload: any
-  ): Promise<string> {
-    const idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  async saveAndEnqueue(table: 'producers' | 'questionnaireResponses', record: Producer | QuestionnaireResponse, action: 'insert' | 'update') {
+    const dexieTable = table === 'producers' ? db.producers : db.questionnaireResponses;
+    const queues = db.syncQueue;
+    const now = new Date().toISOString();
+    const baseRevision = (record as any).cloudRevision || 0;
     const queueItem: SyncQueueItem = {
-      id: `queue_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      table,
-      action,
-      recordId,
-      payload,
-      idempotencyKey,
-      attempts: 0,
-      status: 'pending',
-      createdAt: new Date().toISOString()
+      id: `queue_${table}_${record.id}_${Date.now()}`, table: table === 'questionnaireResponses' ? 'questionnaire_responses' : 'producers',
+      action, recordId: record.id, payload: record, idempotencyKey: `idemp_${table}_${record.id}_${(record as any).updatedAt || now}`,
+      attempts: 0, status: 'pending', createdAt: now, baseRevision, payloadRevision: (record as any).updatedAt || now
     };
-
-    await db.syncQueue.add(queueItem);
-    this.notify();
-
-    // If online, attempt immediate sync
-    if (this.isOnline && !this.isSyncing) {
-      setTimeout(() => this.triggerSync(), 300);
-    }
-
-    return idempotencyKey;
+    await db.transaction('rw', dexieTable, queues, async () => { await dexieTable.put(record as any); await queues.add(queueItem); });
+    void this.notify();
+    if (this.isOnline) setTimeout(() => void this.triggerSync(), 100);
+    return queueItem.idempotencyKey;
   }
 
-  /**
-   * Execute sync cycle for all pending items
-   */
-  public async triggerSync(): Promise<{ success: boolean; syncedCount: number; errors: string[] }> {
-    if (this.isSyncing) {
-      return { success: false, syncedCount: 0, errors: ['Sincronización ya en curso'] };
-    }
+  async enqueue(table: 'producers' | 'questionnaire_responses' | 'activities', action: 'insert' | 'update' | 'delete', recordId: string, payload: any) {
+    if (table === 'producers') return this.saveAndEnqueue('producers', payload, action === 'delete' ? 'update' : action);
+    if (table === 'questionnaire_responses') return this.saveAndEnqueue('questionnaireResponses', payload, action === 'delete' ? 'update' : action);
+    throw new Error('La sincronización de actividades individuales no está implementada; inclúyalas en el registro productor.');
+  }
 
-    const pendingItems = await db.syncQueue.where('status').equals('pending').toArray();
-    if (pendingItems.length === 0) {
-      this.errorMessage = null;
-      this.notify();
-      return { success: true, syncedCount: 0, errors: [] };
-    }
-
-    this.isSyncing = true;
+  async retryFailed() {
+    await db.syncQueue.where('status').equals('failed').modify({ status: 'pending', attempts: 0, nextAttemptAt: undefined, error: undefined, errorKind: undefined });
     this.errorMessage = null;
-    this.notify();
+    return this.triggerSync();
+  }
 
-    let syncedCount = 0;
-    const errors: string[] = [];
+  async triggerSync(): Promise<{ success: boolean; syncedCount: number; errors: string[] }> {
+    if (this.cycle) return this.cycle;
+    if (!this.isOnline) return { success: false, syncedCount: 0, errors: ['Sin conexión; los datos siguen guardados en este dispositivo.'] };
+    this.cycle = this.runCycle();
+    try { return await this.cycle; } finally { this.cycle = null; }
+  }
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    const hasSupabase = Boolean(supabaseUrl && supabaseKey && supabaseUrl !== 'https://your-project.supabase.co');
-
+  private async runCycle() {
+    this.isSyncing = true; this.errorMessage = null; await this.notify();
+    let syncedCount = 0; const errors: string[] = [];
     try {
-      for (const item of pendingItems) {
-        await db.syncQueue.update(item.id, { status: 'syncing', lastAttempt: new Date().toISOString() });
-
-        if (hasSupabase) {
-          // Real cloud sync against Supabase REST endpoint
-          try {
-            const endpoint = `${supabaseUrl}/rest/v1/${item.table}`;
-            const method = item.action === 'insert' ? 'POST' : item.action === 'update' ? 'PATCH' : 'DELETE';
-            const headers: Record<string, string> = {
-              'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
-              'Content-Type': 'application/json',
-              'Prefer': 'resolution=merge-duplicates'
-            };
-
-            const response = await fetch(endpoint, {
-              method,
-              headers,
-              body: JSON.stringify(item.payload)
+      // Drain repeatedly so work enqueued during an upload is handled this cycle.
+      while (this.isOnline) {
+        const now = Date.now();
+        const batch = (await db.syncQueue.where('status').equals('pending').toArray())
+          .filter((item) => !item.nextAttemptAt || new Date(item.nextAttemptAt).getTime() <= now)
+          .sort((a, b) => (a.table === 'producers' ? 0 : 1) - (b.table === 'producers' ? 0 : 1) || a.createdAt.localeCompare(b.createdAt));
+        if (!batch.length) {
+          const nextTime = (await db.syncQueue.where('status').equals('pending').toArray())
+            .map((item) => item.nextAttemptAt ? new Date(item.nextAttemptAt).getTime() : 0)
+            .filter((time) => time > now)
+            .sort((a, b) => a - b)[0];
+          if (nextTime) this.scheduleRetry(nextTime - now);
+          break;
+        }
+        for (const item of batch) {
+          await db.syncQueue.update(item.id, { status: 'syncing', lastAttempt: new Date().toISOString() });
+          const result = await uploadQueueItem(item);
+          if (result.ok) {
+            await db.transaction('rw', db.producers, db.questionnaireResponses, db.syncQueue, async () => {
+              const local = item.table === 'questionnaire_responses' ? await db.questionnaireResponses.get(item.recordId) : await db.producers.get(item.recordId);
+              const matches = local && ((local as any).updatedAt || '') === (item.payloadRevision || (item.payload as any).updatedAt || '');
+              if (matches) {
+                if (item.table === 'questionnaire_responses') await db.questionnaireResponses.update(item.recordId, { syncStatus: 'synced', cloudRevision: result.revision });
+                else await db.producers.update(item.recordId, { syncStatus: 'synced', cloudRevision: result.revision, lastSyncedAt: new Date().toISOString(), syncError: undefined });
+              }
+              await db.syncQueue.update(item.id, { status: 'synced', error: undefined, errorKind: undefined });
+              // The next local edit is based on this device's successful write.
+              const next = (await db.syncQueue.where('status').equals('pending').toArray())
+                .find((queued) => queued.table === item.table && queued.recordId === item.recordId && queued.createdAt >= item.createdAt);
+              if (next) await db.syncQueue.update(next.id, { baseRevision: result.revision });
             });
-
-            if (!response.ok) {
-              const errBody = await response.text();
-              throw new Error(`HTTP ${response.status}: ${errBody}`);
-            }
-
-            // Mark as synced
-            await db.syncQueue.update(item.id, { status: 'synced' });
-            if (item.table === 'producers') {
-              await db.producers.update(item.recordId, { 
-                syncStatus: 'synced', 
-                lastSyncedAt: new Date().toISOString() 
-              });
-            }
             syncedCount++;
-          } catch (err: any) {
-            console.error('Failed to sync item to Supabase:', err);
+            this.lastSyncedAt = new Date().toISOString();
+            await db.appConfig.put({ key: 'last_sync_timestamp', value: this.lastSyncedAt, updatedAt: this.lastSyncedAt });
+          } else if (result.kind === 'conflict') {
+            if (item.table === 'producers') await db.producers.update(item.recordId, { syncStatus: 'conflict', syncError: result.message, syncConflict: { cloudRecord: result.cloudRecord as Producer, detectedAt: new Date().toISOString() } });
+            await db.syncQueue.update(item.id, { status: 'failed', error: result.message, errorKind: 'conflict' });
+            errors.push(result.message);
+          } else {
             const attempts = item.attempts + 1;
-            await db.syncQueue.update(item.id, { 
-              status: attempts >= 5 ? 'failed' : 'pending',
-              attempts,
-              error: err.message 
-            });
-            errors.push(`Error en ${item.recordId}: ${err.message}`);
+            const terminal = result.kind === 'permission' || result.kind === 'validation' || attempts >= 10;
+            const delay = Math.min(5 * 60_000, 2_000 * 2 ** Math.min(attempts - 1, 8));
+            await db.syncQueue.update(item.id, { status: terminal ? 'failed' : 'pending', attempts, error: result.message, errorKind: result.kind, nextAttemptAt: terminal ? undefined : new Date(Date.now() + delay).toISOString() });
+            if (item.table === 'producers') await db.producers.update(item.recordId, { syncStatus: terminal ? 'error' : 'pending', syncError: result.message });
+            else if (item.table === 'questionnaire_responses') await db.questionnaireResponses.update(item.recordId, { syncStatus: terminal ? 'error' : 'pending' });
+            errors.push(result.message);
+            if (!terminal) this.scheduleRetry(delay);
           }
-        } else {
-          // Offline-First + Firebase Firestore Cloud Sync mode:
-          // Syncs directly with Firebase Firestore cloud database
-          try {
-            if (item.table === 'producers' && item.payload) {
-              const { uploadProducerToCloud } = await import('./firestoreSync');
-              await uploadProducerToCloud(item.payload);
-            }
-          } catch (cloudErr) {
-            console.warn('[SyncEngine] Cloud upload notice:', cloudErr);
-          }
-          
-          await db.syncQueue.update(item.id, { status: 'synced' });
-          if (item.table === 'producers') {
-            await db.producers.update(item.recordId, { 
-              syncStatus: 'synced', 
-              lastSyncedAt: new Date().toISOString() 
-            });
-          } else if (item.table === 'questionnaire_responses') {
-            await db.questionnaireResponses.update(item.recordId, {
-              syncStatus: 'synced'
-            });
-          }
-          syncedCount++;
         }
       }
-
-      this.lastSyncedAt = new Date().toISOString();
-      await db.appConfig.put({ 
-        key: 'last_sync_timestamp', 
-        value: this.lastSyncedAt, 
-        updatedAt: this.lastSyncedAt 
-      });
-
-      if (errors.length > 0) {
-        this.errorMessage = `Se sincronizaron ${syncedCount} elementos con ${errors.length} observaciones.`;
-      }
-    } catch (err: any) {
-      this.errorMessage = err.message || 'Error durante la sincronización';
-    } finally {
-      this.isSyncing = false;
-      this.notify();
-    }
-
+    } catch (error: any) { const message = error?.message || 'Error durante la sincronización.'; this.errorMessage = message; errors.push(message); }
+    finally { this.isSyncing = false; if (errors.length) this.errorMessage = errors[0]; await this.notify(); }
     return { success: errors.length === 0, syncedCount, errors };
   }
-
+  private scheduleRetry(delay: number) {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.triggerSync(); }, delay);
+  }
   private async notify() {
-    const pendingCount = await this.getPendingCount();
-    const current = this.getStatus();
-    current.pendingCount = pendingCount;
-    
-    // Compute aggregate state
-    if (!this.isOnline) {
-      current.state = 'OFFLINE';
-    } else if (this.isSyncing) {
-      current.state = 'SINCRONIZANDO';
-    } else if (this.errorMessage) {
-      current.state = 'ERROR';
-    } else if (pendingCount > 0) {
-      current.state = 'PENDIENTE';
-    } else {
-      current.state = 'SINCRONIZADO';
-    }
-
+    const [pendingCount, failedCount, conflictCount] = await Promise.all([
+      db.syncQueue.where('status').equals('pending').count().catch(() => 0),
+      db.syncQueue.where('status').equals('failed').count().catch(() => 0),
+      db.producers.where('syncStatus').equals('conflict').count().catch(() => 0)
+    ]);
+    const current = this.getStatus(); current.pendingCount = pendingCount; current.failedCount = failedCount; current.conflictCount = conflictCount;
+    if (!this.isOnline) current.state = 'OFFLINE'; else if (this.isSyncing) current.state = 'SINCRONIZANDO'; else if (this.errorMessage || failedCount || conflictCount) current.state = 'ERROR'; else if (pendingCount) current.state = 'PENDIENTE'; else current.state = 'SINCRONIZADO';
     this.listeners.forEach((listener) => listener(current));
   }
 }

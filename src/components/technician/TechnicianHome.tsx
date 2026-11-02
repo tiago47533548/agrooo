@@ -78,10 +78,13 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
     try {
       await triggerSync();
       const { syncCloudWithLocal } = await import('../../services/firestoreSync');
-      const res = await syncCloudWithLocal();
+      await syncCloudWithLocal();
+      const res = await triggerSync();
       await loadData();
       onDataChanged?.();
-      setSyncToast(`¡Sincronización ministerial completada! Se respaldaron ${res.total} productores en la nube y ya están visibles para el administrador.`);
+      setSyncToast(res.success
+        ? `Firebase confirmó ${res.syncedCount} registros.`
+        : `Firebase confirmó ${res.syncedCount}; ${res.errors.length} no se pudieron enviar. ${res.errors[0] || ''}`);
       setTimeout(() => setSyncToast(null), 6000);
     } catch (err: any) {
       setSyncToast(`Aviso de sincronización: ${err?.message || 'Los datos permanecen seguros en tu dispositivo.'}`);
@@ -134,13 +137,6 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
     await loadData();
     onDataChanged?.();
 
-    // Intentar sincronizar inmediatamente a la nube en segundo plano
-    try {
-      const { uploadProducerToCloud } = await import('../../services/firestoreSync');
-      await uploadProducerToCloud(saved);
-    } catch (e) {
-      console.warn('Relevamiento guardado localmente, pendiente de red:', e);
-    }
   };
 
   // Manejo de actualización y subida rápida de logo de chacra
@@ -153,11 +149,10 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
         logoUrl: compressed,
         updatedAt: new Date().toISOString()
       };
-      await db.producers.put(updated);
+      await uploadProducerToCloud(updated);
       setSelectedProducerModal(updated);
       await loadData();
       onDataChanged?.();
-      uploadProducerToCloud(updated).catch(() => {});
     } catch (err: any) {
       alert(err?.message || 'Error al actualizar el logo');
     } finally {
@@ -172,11 +167,10 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
         logoUrl: '',
         updatedAt: new Date().toISOString()
       };
-      await db.producers.put(updated);
+      await uploadProducerToCloud(updated);
       setSelectedProducerModal(updated);
       await loadData();
       onDataChanged?.();
-      uploadProducerToCloud(updated).catch(() => {});
     } catch (err: any) {
       alert(err?.message || 'Error al quitar el logo');
     }

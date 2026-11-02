@@ -82,10 +82,14 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
     setIsSyncingCloud(true);
     setDashboardMessage(null);
     try {
-      const res = await syncCloudWithLocal();
+      await syncCloudWithLocal();
+      const { syncEngine } = await import('../../services/syncEngine');
+      const res = await syncEngine.triggerSync();
       setDashboardMessage({
-        type: 'success',
-        text: `¡Sincronización con la Nube Ministerial (Firebase) completada! Se descargaron ${res.downloaded} nuevos relevamientos de campo y se sincronizaron ${res.total} productores en total.`
+        type: res.success ? 'success' : 'error',
+        text: res.success
+          ? `Firebase confirmó ${res.syncedCount} registros enviados.`
+          : `Firebase confirmó ${res.syncedCount}; no se pudieron enviar ${res.errors.length} registros. ${res.errors[0] || ''}`
       });
       onDataChanged?.();
     } catch (e: any) {

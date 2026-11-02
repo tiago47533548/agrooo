@@ -8,15 +8,18 @@ export function useSyncEngine() {
     const unsubscribe = syncEngine.subscribe((newStatus) => {
       setStatus({ ...newStatus });
     });
-    return unsubscribe;
+    return () => { unsubscribe(); };
   }, []);
 
   const triggerSync = async () => {
     return await syncEngine.triggerSync();
   };
 
+  const retryFailed = async () => syncEngine.retryFailed();
+
   return {
     ...status,
-    triggerSync
+    triggerSync,
+    retryFailed
   };
 }

@@ -35,7 +35,6 @@ interface DatabaseImporterProps {
 }
 
 import { parseAndImportProducerFile } from '../../utils/fileImporterUtil';
-import { uploadProducerToCloud } from '../../services/firestoreSync';
 
 // SIP Misiones Target Field Definitions
 export const SIP_SYSTEM_FIELDS = [
@@ -371,8 +370,7 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
                 importBatchId: batchId
               };
 
-              await db.producers.put(updatedProd);
-              await syncEngine.enqueue('producers', 'update', updatedProd.id, updatedProd);
+              await syncEngine.saveAndEnqueue('producers', updatedProd, 'update');
               updatedCount++;
               log.push(`Fila ${row.rowNumber}: Actualizado productor ${row.fullName} (DNI ${row.dni})`);
               continue;
@@ -437,8 +435,7 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
           importRowNumber: row.rowNumber
         };
 
-        await db.producers.put(newProducer);
-        await syncEngine.enqueue('producers', 'insert', newProducer.id, newProducer);
+        await syncEngine.saveAndEnqueue('producers', newProducer, 'insert');
         importedCount++;
         log.push(`Fila ${row.rowNumber}: Creado productor ${row.fullName} (DNI ${row.dni})`);
       }

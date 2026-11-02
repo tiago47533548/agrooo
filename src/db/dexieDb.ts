@@ -49,6 +49,23 @@ export class SipMisionesDatabase extends Dexie {
       producers: 'id, dni, fullName, municipality, syncStatus, isGeolocated, updatedAt, createdAt, createdById, importBatchId',
       importBatches: 'id, fileName, createdAt, createdById, status'
     });
+
+    this.version(3).stores({
+      producers: 'id, dni, fullName, municipality, syncStatus, isGeolocated, updatedAt, createdAt, createdById, importBatchId',
+      questionnaires: 'id, code, category, status, version, updatedAt',
+      questionnaireResponses: 'id, questionnaireId, producerId, syncStatus, createdAt',
+      syncQueue: 'id, table, action, recordId, idempotencyKey, status, attempts, createdAt, nextAttemptAt, errorKind',
+      auditLogs: 'id, timestamp, entity, userId',
+      notifications: 'id, read, createdAt',
+      invitations: 'id, code, status, role, expiresAt',
+      appConfig: 'key',
+      users: 'id, email, dni, role, active',
+      importBatches: 'id, fileName, createdAt, createdById, status'
+    }).upgrade(async (tx) => {
+      // Old Firebase queue runs marked failed writes as synced; reconcile records
+      // against Firestore before declaring them delivered.
+      await tx.table('syncQueue').where('status').equals('syncing').modify({ status: 'pending' });
+    });
   }
 }
 
