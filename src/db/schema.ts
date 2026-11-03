@@ -259,6 +259,7 @@ export interface SyncQueueItem {
   errorKind?: 'transient' | 'permission' | 'validation' | 'conflict' | 'unknown';
   baseRevision?: number;
   payloadRevision?: string;
+  blockedByOperationId?: string;
 }
 
 export interface AuditLog {

@@ -20,6 +20,13 @@ function toProfile(uid: string, data: Record<string, any>): UserProfile {
   return { ...data, id: uid, uid, email: String(data.email || ''), fullName: String(data.fullName || ''), role: data.role, dni: String(data.dni || ''), active: data.active === true } as unknown as UserProfile;
 }
 
+const OFFLINE_AUTHORIZATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function isAuthorizationCacheFresh(checkedAt: unknown, now = Date.now()): boolean {
+  const timestamp = Number(checkedAt);
+  return Number.isFinite(timestamp) && timestamp > 0 && timestamp <= now && now - timestamp <= OFFLINE_AUTHORIZATION_TTL_MS;
+}
+
 export class AuthService {
   static async signOut(): Promise<void> {
     await signOut(firebaseAuth);
@@ -36,17 +43,36 @@ export class AuthService {
       const snap = await getDoc(doc(firebaseDb, 'users', user.uid));
       if (!snap.exists()) return null;
       const profile = toProfile(user.uid, snap.data());
-      localStorage.setItem(cacheKey, JSON.stringify({ profile, checkedAt: Date.now() }));
+      try { localStorage.setItem(cacheKey, JSON.stringify({ profile, checkedAt: Date.now() })); }
+      catch { /* Storage may be disabled; online authorization still succeeds. */ }
       return profile;
     } catch (error: any) {
       const networkFailure = ['auth/network-request-failed', 'unavailable', 'deadline-exceeded', 'network-request-failed'].includes(String(error?.code || ''));
       if (navigator.onLine && !networkFailure) throw error;
       try {
         const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-        if (cached?.profile && Date.now() - Number(cached.checkedAt) <= 7 * 86400000) return cached.profile as UserProfile;
+        if (cached?.profile && isAuthorizationCacheFresh(cached.checkedAt)) return cached.profile as UserProfile;
       } catch { /* Ignore corrupt or expired offline profile cache. */ }
       return null;
     }
+  }
+
+  static async requireFieldworkAuthorization(): Promise<UserProfile> {
+    const user = firebaseAuth.currentUser;
+    if (!user) throw new Error('Iniciá sesión para guardar trabajo de campo.');
+    const profile = await this.getAuthenticatedProfile(user);
+    if (!profile || !profile.active || profile.approvalStatus !== 'approved') {
+      throw new Error('La cuenta no está autorizada o venció el período de trabajo sin conexión. Conectate para validar el acceso.');
+    }
+    if (!navigator.onLine) {
+      try {
+        const cache = JSON.parse(localStorage.getItem(`sip-account-${user.uid}`) || 'null');
+        if (!isAuthorizationCacheFresh(cache?.checkedAt)) throw new Error('expired');
+      } catch {
+        throw new Error('El acceso offline venció. Conectate para validar la cuenta antes de continuar.');
+      }
+    }
+    return profile;
   }
 
 
@@ -67,8 +93,13 @@ export class AuthService {
 
   static async createPasswordAccount(email: string, password: string, fullName: string): Promise<void> {
     const credential = await createUserWithEmailAndPassword(firebaseAuth, email.trim().toLowerCase(), password);
-    await updateProfile(credential.user, { displayName: fullName.trim() });
-    await sendEmailVerification(credential.user);
+    try {
+      await updateProfile(credential.user, { displayName: fullName.trim() });
+      await sendEmailVerification(credential.user);
+    } catch (error) {
+      await signOut(firebaseAuth).catch(() => undefined);
+      throw error;
+    }
   }
 
   static async signInForInvitation(email: string, password: string): Promise<User> {

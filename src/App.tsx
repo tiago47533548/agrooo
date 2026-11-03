@@ -89,44 +89,59 @@ export default function App() {
   useEffect(() => {
     let unsubscribeCloud: (() => void) | null = null;
     let onlineHandler: (() => void) | null = null;
-    let cancelled = false;
+    let authGeneration = 0;
     void refreshData();
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      const generation = ++authGeneration;
       unsubscribeCloud?.();
       unsubscribeCloud = null;
       if (onlineHandler) window.removeEventListener('online', onlineHandler);
       onlineHandler = null;
+      setCurrentUser(null);
+      setProducers([]);
+      setQuestionnaires([]);
+      setNotifications([]);
       if (!firebaseUser) {
         await switchDatabaseForUser();
+        if (generation !== authGeneration) return;
         setCurrentUser(null);
         resolveInitialRoute(null);
+        await refreshData();
         return;
       }
       try {
         await switchDatabaseForUser(firebaseUser.uid);
+        if (generation !== authGeneration || auth.currentUser?.uid !== firebaseUser.uid) return;
         const profile = await AuthService.getAuthenticatedProfile(firebaseUser);
-        if (cancelled) return;
+        if (generation !== authGeneration || auth.currentUser?.uid !== firebaseUser.uid) return;
         if (!profile || !profile.active || profile.approvalStatus !== 'approved') {
           setCurrentUser(null);
           resolveInitialRoute(null);
+          await switchDatabaseForUser();
           return;
         }
         setCurrentUser(profile);
         resolveInitialRoute(profile);
         const { syncCloudWithLocal, subscribeToCloudProducers } = await import('./services/firestoreSync');
         await syncCloudWithLocal();
-        if (cancelled) return;
+        if (generation !== authGeneration || auth.currentUser?.uid !== firebaseUser.uid) return;
         await syncEngine.triggerSync();
+        if (generation !== authGeneration || auth.currentUser?.uid !== firebaseUser.uid) return;
         unsubscribeCloud = subscribeToCloudProducers(() => { void refreshData(); });
         onlineHandler = () => {
-          void syncCloudWithLocal().then(() => syncEngine.triggerSync()).then(() => refreshData()).catch((error) => console.warn('No se pudo revalidar la caché al reconectar:', error));
+          if (generation !== authGeneration || auth.currentUser?.uid !== firebaseUser.uid) return;
+          void syncCloudWithLocal().then(() => syncEngine.triggerSync()).then(() => {
+            if (generation === authGeneration && auth.currentUser?.uid === firebaseUser.uid) return refreshData();
+          }).catch((error) => console.warn('No se pudo revalidar la caché al reconectar:', error));
         };
         window.addEventListener('online', onlineHandler);
         await refreshData();
       } catch (error) {
         console.warn('No se pudo restaurar la sesión autenticada:', error);
+        if (generation !== authGeneration) return;
         setCurrentUser(null);
         resolveInitialRoute(null);
+        await switchDatabaseForUser();
       }
     });
 
@@ -137,7 +152,7 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
     return () => {
       window.removeEventListener('popstate', handlePopState);
-      cancelled = true;
+      authGeneration++;
       unsubscribeAuth();
       if (onlineHandler) window.removeEventListener('online', onlineHandler);
       if (unsubscribeCloud) {
@@ -159,7 +174,7 @@ export default function App() {
 
     if (path.startsWith('/formulario/')) {
       const formCode = path.replace('/formulario/', '').trim();
-      db.questionnaires.where('code').equalsIgnoreCase(formCode).first().then((found) => {
+      db.publishedQuestionnaireVersions.where('code').equalsIgnoreCase(formCode).last().then((found) => {
         if (found) setRunningQuestionnaire({ q: found });
       });
     }
@@ -260,9 +275,13 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await AuthService.signOut();
-    setCurrentUser(null);
-    navigateTo('landing', '/');
+    try {
+      await AuthService.signOut();
+      setCurrentUser(null);
+      navigateTo('landing', '/');
+    } catch (error: any) {
+      setRouteAccessNotice(error?.message || 'No se pudo cerrar la sesión. Intentá nuevamente.');
+    }
   };
 
   // 1. Deep link invitation handler
@@ -771,7 +790,7 @@ export default function App() {
                             onClick={() => setBuilderQuestionnaire(q)}
                             className="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-[11px]"
                           >
-                            Editar
+                            {q.status === 'published' ? 'Crear borrador' : 'Editar borrador'}
                           </button>
 
                           <button

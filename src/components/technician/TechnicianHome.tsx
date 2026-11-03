@@ -61,7 +61,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
       const allProducers = await db.producers.orderBy('updatedAt').reverse().toArray();
       setProducers(allProducers);
 
-      const allQuests = await db.questionnaires.where('status').equals('published').toArray();
+      const allQuests = await db.publishedQuestionnaireVersions.orderBy('publishedAt').reverse().toArray();
       setQuestionnaires(allQuests);
     } catch (e) {
       console.error('Failed to load local technician data', e);

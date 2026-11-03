@@ -252,7 +252,8 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
         const rawEmail = String(row[columnMapping['email']] || '').trim();
         const rawEst = String(row[columnMapping['establishmentName']] || '').trim();
         const rawColony = String(row[columnMapping['colonyParaje']] || '').trim();
-        const rawSurface = parseFloat(String(row[columnMapping['surfaceHa']] || '').replace(',', '.').replace(/[^0-9.]/g, ''));
+        const rawSurfaceText = String(row[columnMapping['surfaceHa']] ?? '').trim();
+        const rawSurface = rawSurfaceText === '' ? Number.NaN : parseFloat(rawSurfaceText.replace(',', '.').replace(/[^0-9.]/g, ''));
         const rawAct = String(row[columnMapping['activityType']] || '').trim();
         const rawLat = parseFloat(String(row[columnMapping['lat']] || '').replace(',', '.'));
         const rawLng = parseFloat(String(row[columnMapping['lng']] || '').replace(',', '.'));
@@ -266,12 +267,10 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
         );
         if (matchedMun) {
           normalizedMun = matchedMun.name;
-        } else if (!rawMun) {
-          normalizedMun = 'Oberá'; // fallback default
         }
 
         // Coordinate validation
-        const hasValidCoords = !isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0;
+        const hasValidCoords = Number.isFinite(rawLat) && Number.isFinite(rawLng);
         const inMisiones = hasValidCoords && isCoordinateInMisionesRange(rawLat, rawLng);
 
         // Duplicate checks
@@ -301,7 +300,7 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
           establishmentName: rawEst || 'Establecimiento sin nombre',
           municipality: normalizedMun,
           colonyParaje: rawColony || 'Zona rural',
-          surfaceHa: isNaN(rawSurface) ? 10 : rawSurface,
+          surfaceHa: Number.isFinite(rawSurface) && rawSurface >= 0 ? rawSurface : null,
           activityType: rawAct || 'Yerba Mate',
           lat: hasValidCoords ? rawLat : undefined,
           lng: hasValidCoords ? rawLng : undefined,
@@ -360,13 +359,14 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
                 email: row.email || existing.email,
                 establishmentName: row.establishmentName || existing.establishmentName,
                 municipality: row.municipality || existing.municipality,
-                surfaceHa: row.surfaceHa || existing.surfaceHa,
+                surfaceHa: row.surfaceHa == null ? existing.surfaceHa : row.surfaceHa,
                 lat: row.lat !== undefined ? row.lat : existing.lat,
                 lng: row.lng !== undefined ? row.lng : existing.lng,
                 isGeolocated: row.lat !== undefined ? true : existing.isGeolocated,
                 version: existing.version + 1,
                 updatedAt: now,
                 syncStatus: 'pending',
+                cloudRevision: existing.cloudRevision,
                 importBatchId: batchId
               };
 
@@ -390,7 +390,7 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
           producerId: '',
           type: catalogMatch?.type || 'yerba_mate',
           title: catalogMatch?.name || actName,
-          surfaceHa: row.surfaceHa || 5,
+          surfaceHa: row.surfaceHa ?? null,
           specificData: {
             sistemaProductivo: 'Relevamiento importado de padrón externo'
           },
@@ -409,17 +409,15 @@ export const DatabaseImporter: React.FC<DatabaseImporterProps> = ({
           isEstablishmentHead: true,
           producerType: 'pequeno_familiar',
           establishmentName: row.establishmentName || 'Establecimiento sin nombre',
-          municipality: row.municipality || 'Oberá',
+          municipality: row.municipality || '',
           colonyParaje: row.colonyParaje || 'Zona rural',
           addressReference: row.observations || '',
-          lat: row.lat !== undefined ? row.lat : -27.4862,
-          lng: row.lng !== undefined ? row.lng : -55.1205,
-          isGeolocated: row.lat !== undefined,
-          locationMethod: row.lat !== undefined ? 'manual_coords' : undefined,
-          locationCapturedAt: now,
-          locationCapturedBy: currentUserName,
-          tenureType: 'propiedad_con_titulo',
-          surfaceHa: row.surfaceHa || 10,
+          lat: row.lat ?? null,
+          lng: row.lng ?? null,
+          isGeolocated: Number.isFinite(row.lat) && Number.isFinite(row.lng),
+          locationMethod: Number.isFinite(row.lat) && Number.isFinite(row.lng) ? 'manual_coords' : undefined,
+          tenureType: null,
+          surfaceHa: row.surfaceHa ?? null,
           activities: [newActivity],
           observations: `Importado desde archivo "${file?.name || 'Excel'}" (Fila ${row.rowNumber}). ${row.observations}`,
           syncStatus: 'pending',

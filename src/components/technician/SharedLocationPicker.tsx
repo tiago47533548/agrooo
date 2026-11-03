@@ -27,6 +27,7 @@ import {
 interface SharedLocationPickerProps {
   initialLat?: number;
   initialLng?: number;
+  hasInitialLocation?: boolean;
   initialMethod?: LocationCaptureMethod;
   initialAddressRef?: string;
   initialMunicipality?: string;
@@ -47,6 +48,7 @@ interface SharedLocationPickerProps {
 export const SharedLocationPicker: React.FC<SharedLocationPickerProps> = ({
   initialLat = -27.4862,
   initialLng = -55.1205,
+  hasInitialLocation = false,
   initialMethod = 'manual_map',
   initialAddressRef = '',
   initialMunicipality = 'Oberá',
@@ -54,14 +56,14 @@ export const SharedLocationPicker: React.FC<SharedLocationPickerProps> = ({
   onLocationConfirmed
 }) => {
   const [activeTab, setActiveTab] = useState<'gps' | 'map' | 'share'>('map');
-  const [lat, setLat] = useState<number>(initialLat);
-  const [lng, setLng] = useState<number>(initialLng);
+  const [lat, setLat] = useState<number | null>(hasInitialLocation ? initialLat : null);
+  const [lng, setLng] = useState<number | null>(hasInitialLocation ? initialLng : null);
   const [municipality, setMunicipality] = useState<string>(initialMunicipality);
   const [addressRef, setAddressRef] = useState<string>(initialAddressRef);
   const [captureMethod, setCaptureMethod] = useState<LocationCaptureMethod>(initialMethod);
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>(undefined);
   const [originalInput, setOriginalInput] = useState<string>('');
-  const [isConfirmed, setIsConfirmed] = useState<boolean>(true);
+  const [isConfirmed, setIsConfirmed] = useState<boolean>(hasInitialLocation);
 
   // GPS state
   const [isLocatingGPS, setIsLocatingGPS] = useState(false);
@@ -148,6 +150,7 @@ export const SharedLocationPicker: React.FC<SharedLocationPickerProps> = ({
   };
 
   const handleConfirmLocation = () => {
+    if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng) || !isCoordinateInMisionesRange(lat, lng) || !originalInput) return;
     setIsConfirmed(true);
     onLocationConfirmed({
       lat,
@@ -177,7 +180,7 @@ export const SharedLocationPicker: React.FC<SharedLocationPickerProps> = ({
   };
 
   const methodBadge = getMethodBadge();
-  const inMisiones = isCoordinateInMisionesRange(lat, lng);
+  const inMisiones = lat !== null && lng !== null && isCoordinateInMisionesRange(lat, lng);
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs space-y-4 p-4 sm:p-5">
@@ -297,13 +300,13 @@ export const SharedLocationPicker: React.FC<SharedLocationPickerProps> = ({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium px-1">
             <span>Toque cualquier punto del mapa o arrastre el marcador para fijar la chacra:</span>
-            <span className="font-mono text-slate-700 font-semibold">{lat.toFixed(5)}, {lng.toFixed(5)}</span>
+            <span className="font-mono text-slate-700 font-semibold">{lat !== null && lng !== null ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : 'Sin coordenadas seleccionadas'}</span>
           </div>
 
           <MisionesMap
             producers={[]}
             isPickerMode={true}
-            initialCoords={{ lat, lng }}
+            initialCoords={{ lat: lat ?? initialLat, lng: lng ?? initialLng }}
             onLocationPicked={handleMapLocationPicked}
             height="h-56 sm:h-64"
           />
@@ -378,11 +381,11 @@ export const SharedLocationPicker: React.FC<SharedLocationPickerProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-700">
           <div>
             <span className="text-[10px] text-slate-400 block">Latitud</span>
-            <span className="font-mono font-bold text-slate-900">{lat.toFixed(6)}</span>
+            <span className="font-mono font-bold text-slate-900">{lat?.toFixed(6) ?? 'Desconocida'}</span>
           </div>
           <div>
             <span className="text-[10px] text-slate-400 block">Longitud</span>
-            <span className="font-mono font-bold text-slate-900">{lng.toFixed(6)}</span>
+            <span className="font-mono font-bold text-slate-900">{lng?.toFixed(6) ?? 'Desconocida'}</span>
           </div>
           <div>
             <span className="text-[10px] text-slate-400 block">Municipio Asignado</span>

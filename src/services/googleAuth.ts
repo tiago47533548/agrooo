@@ -49,6 +49,7 @@ export class GoogleAuthService {
 
       const email = firebaseUser.email?.trim().toLowerCase();
       if (!email || !firebaseUser.emailVerified) {
+        await firebaseSignOut(auth).catch(() => undefined);
         return {
           success: false,
           error: 'No se pudo obtener una dirección de correo verificada desde la cuenta de Google.'
@@ -115,12 +116,7 @@ export class GoogleAuthService {
    * Cierra la sesión activa tanto en Firebase como en el almacenamiento local
    */
   static async signOut(): Promise<void> {
-    try {
-      await firebaseSignOut(auth);
-    } catch (e) {
-      console.warn('Error cerrando sesión en Firebase:', e);
-    }
-    AuthService.clearSession();
+    await AuthService.signOut();
   }
 
   /**

@@ -103,7 +103,8 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   };
   // Aggregate KPIs
   const totalProducers = producers.length;
-  const totalSurfaceHa = producers.reduce((sum, p) => sum + (Number(p.surfaceHa) || 0), 0);
+  const knownSurfaceProducers = producers.filter((producer) => typeof producer.surfaceHa === 'number' && Number.isFinite(producer.surfaceHa) && producer.surfaceHa >= 0);
+  const totalSurfaceHa = knownSurfaceProducers.reduce((sum, producer) => sum + producer.surfaceHa!, 0);
   const validatedCount = producers.filter((p) => p.verifiedBySupervisor).length;
   const uniqueMunicipalities = new Set(producers.map((p) => p.municipality)).size;
 
@@ -123,7 +124,9 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
     p.activities?.forEach((act) => {
       if (activityDistribution[act.type]) {
         activityDistribution[act.type].count += 1;
-        activityDistribution[act.type].surfaceHa += Number(act.surfaceHa) || 0;
+        if (typeof act.surfaceHa === 'number' && Number.isFinite(act.surfaceHa) && act.surfaceHa >= 0) {
+          activityDistribution[act.type].surfaceHa += act.surfaceHa;
+        }
       }
     });
   });
@@ -267,7 +270,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
             {Math.round(totalSurfaceHa).toLocaleString()} <span className="text-base font-normal">ha</span>
           </div>
           <span className="text-xs text-slate-500 mt-1 block">
-            Tierras productivas georreferenciadas
+            Suma de superficies conocidas ({knownSurfaceProducers.length} de {totalProducers} productores)
           </span>
         </div>
 
@@ -306,7 +309,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
               <Trees className="w-4 h-4 text-[#27865A]" />
               <span>Superficie por Actividad Productiva (Hectáreas)</span>
             </h3>
-            <span className="text-xs font-mono text-slate-400">Total: {Math.round(totalSurfaceHa)} ha</span>
+            <span className="text-xs font-mono text-slate-400">Superficie conocida: {Math.round(totalSurfaceHa)} ha</span>
           </div>
 
           <div className="space-y-3">

@@ -492,8 +492,9 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
           <div className="space-y-4 animate-in fade-in duration-200">
             {/* MÓDULO 1: Ubicación del Establecimiento con 3 alternativas */}
             <SharedLocationPicker
-              initialLat={formData.lat || -27.4862}
-              initialLng={formData.lng || -55.1205}
+              initialLat={formData.lat ?? -27.4862}
+              initialLng={formData.lng ?? -55.1205}
+              hasInitialLocation={Number.isFinite(formData.lat) && Number.isFinite(formData.lng) && Boolean(formData.locationCapturedAt)}
               initialMethod={formData.locationMethod || 'manual_map'}
               initialAddressRef={formData.addressReference || ''}
               initialMunicipality={formData.municipality || 'Oberá'}

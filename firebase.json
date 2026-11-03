@@ -1,10 +1,10 @@
 {
   "functions": [{ "source": "functions", "codebase": "default", "runtime": "nodejs20" }],
-  "firestore": {
+  "firestore": [{
     "database": "ai-studio-sipmisionessiste-84140521-dd09-4717-8340-b1ed25aa1dd7",
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
-  },
+  }],
   "storage": { "rules": "storage.rules" },
   "emulators": {
     "auth": { "port": 9099 },

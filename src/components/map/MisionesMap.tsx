@@ -243,10 +243,11 @@ export const MisionesMap: React.FC<MisionesMapProps> = ({
     if (showDensityHeatmap) {
       filtered.forEach((p) => {
         if (typeof p.lat !== 'number' || !Number.isFinite(p.lat) || typeof p.lng !== 'number' || !Number.isFinite(p.lng)) return;
+        if (typeof p.surfaceHa !== 'number' || !Number.isFinite(p.surfaceHa) || p.surfaceHa < 0) return;
         const primaryAct = p.activities?.[0]?.type || 'yerba_mate';
         const cat = PRODUCTIVE_ACTIVITIES_CATALOG.find((c) => c.type === primaryAct);
         const heatColor = cat?.color || '#27865A';
-        const radiusMeters = Math.min(Math.max((p.surfaceHa || 10) * 120, 1500), 7500);
+        const radiusMeters = Math.min(Math.max(p.surfaceHa * 120, 1500), 7500);
 
         const circle = L.circle([p.lat, p.lng], {
           radius: radiusMeters,

@@ -1,9 +1,4 @@
-import { initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-
-initializeApp({ projectId: 'gen-lang-client-0928991490' });
-const databaseId = 'ai-studio-sipmisionessiste-84140521-dd09-4717-8340-b1ed25aa1dd7';
-const firestore = getFirestore(databaseId);
+import { databaseId, firestore } from './firebaseAdmin.js';
 const aliases: Record<string, string> = {
   obera: 'obera', obera_misiones: 'obera',
   posadas: 'posadas', 'posadas_zona_rural_periurbana': 'posadas',

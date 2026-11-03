@@ -30,6 +30,10 @@ export const QuestionnaireBuilder: React.FC<QuestionnaireBuilderProps> = ({
   onSuccess,
   existingQuestionnaire = null
 }) => {
+  const isPublishedSource = existingQuestionnaire?.status === 'published';
+  const draftId = existingQuestionnaire
+    ? isPublishedSource ? `${existingQuestionnaire.id}_draft` : existingQuestionnaire.id
+    : undefined;
   const [title, setTitle] = useState(existingQuestionnaire?.title || '');
   const [code, setCode] = useState(existingQuestionnaire?.code || `CUEST-${Date.now().toString().slice(-4)}`);
   const [description, setDescription] = useState(existingQuestionnaire?.description || '');
@@ -85,10 +89,10 @@ export const QuestionnaireBuilder: React.FC<QuestionnaireBuilderProps> = ({
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      const currentVersion = existingQuestionnaire ? existingQuestionnaire.version : 1;
+      const currentVersion = existingQuestionnaire && !isPublishedSource ? existingQuestionnaire.version : 0;
       
       const questionnaireRecord: DynamicQuestionnaire = {
-        id: existingQuestionnaire?.id || `quest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: draftId || `quest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         code: code.trim().toUpperCase(),
         title: title.trim(),
         description: description.trim(),
@@ -106,7 +110,8 @@ export const QuestionnaireBuilder: React.FC<QuestionnaireBuilderProps> = ({
         const result = await httpsCallable(firebaseFunctions, 'publishQuestionnaire')({ questionnaire: questionnaireRecord });
         savedRecord = (result.data as { questionnaire: DynamicQuestionnaire }).questionnaire;
       } else {
-        await db.questionnaires.put(questionnaireRecord);
+        const result = await httpsCallable(firebaseFunctions, 'saveQuestionnaireDraft')({ questionnaire: questionnaireRecord });
+        savedRecord = (result.data as { questionnaire: DynamicQuestionnaire }).questionnaire;
       }
 
       // Notification
@@ -149,10 +154,10 @@ export const QuestionnaireBuilder: React.FC<QuestionnaireBuilderProps> = ({
         </div>
 
         <h2 className="text-xl font-bold tracking-tight text-white">
-          {existingQuestionnaire ? 'Editar Cuestionario Dinámico' : 'Crear Nuevo Cuestionario Territorial'}
+          {isPublishedSource ? 'Crear Borrador desde una Versión Publicada' : existingQuestionnaire ? 'Editar Borrador' : 'Crear Nuevo Cuestionario Territorial'}
         </h2>
         <p className="text-xs text-[#E8F2EA]/90 mt-1">
-          Las preguntas agregadas aquí se sincronizan automáticamente a la app móvil de los técnicos sin necesidad de actualizar código ni compilar la aplicación.
+          Los borradores son privados para administradores. Los técnicos reciben versiones publicadas e inmutables para trabajar sin conexión.
         </p>
       </div>
 

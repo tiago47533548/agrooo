@@ -1,10 +1,6 @@
-import { initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { databaseId, firestore } from './firebaseAdmin.js';
 import { writeFile } from 'node:fs/promises';
 
-initializeApp({ projectId: 'gen-lang-client-0928991490' });
-const databaseId = 'ai-studio-sipmisionessiste-84140521-dd09-4717-8340-b1ed25aa1dd7';
-const firestore = getFirestore(databaseId);
 const collections = ['users', 'producers', 'questionnaires', 'questionnaireVersions', 'questionnaireResponses', 'invitations', 'auditLogs'];
 const output: Record<string, unknown[]> = {};
 for (const name of collections) {

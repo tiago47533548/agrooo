@@ -4,7 +4,7 @@
   "type": "module",
   "engines": { "node": "20" },
   "main": "lib/index.js",
-  "scripts": { "build": "tsc", "lint": "tsc --noEmit", "bootstrap-admin": "npm run build && node lib/bootstrap-admin.js", "export-cloud": "npm run build && node lib/export-cloud.js", "migrate-municipalities": "npm run build && node lib/migrate-municipalities.js" },
+  "scripts": { "build": "tsc", "lint": "tsc --noEmit", "bootstrap-admin": "npm run build && node lib/bootstrap-admin.js", "export-cloud": "npm run build && node lib/export-cloud.js", "migrate-municipalities": "npm run build && node lib/migrate-municipalities.js", "review-prototype-records": "npm run build && node lib/review-prototype-records.js" },
   "dependencies": {
     "firebase-admin": "^13.0.0",
     "firebase-functions": "^6.0.0"

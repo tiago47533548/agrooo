@@ -5,7 +5,7 @@ import {
   collection, doc, getDoc, getDocs, getFirestore, onSnapshot, runTransaction,
   serverTimestamp, query, where
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import firebaseConfig from './firebaseConfig';
 import { db } from '../db/dexieDb';
 import { Producer, QuestionnaireResponse, SyncQueueItem } from '../db/schema';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
@@ -16,6 +16,16 @@ export const auth = getAuth(app);
 export const firestoreDb = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 export type UploadResult = { ok: true; revision: number } | { ok: false; kind: 'transient' | 'permission' | 'validation' | 'conflict' | 'unknown'; message: string; cloudRecord?: any };
+
+export type ReconciliationDecision = 'keep' | 'delete' | 'quarantine';
+
+export function decideMissingProducer(local: Producer, querySucceeded: boolean, isPrivileged: boolean, assignedMunicipalities: string[]): ReconciliationDecision {
+  if (!querySucceeded) return 'keep';
+  const inScope = isPrivileged || assignedMunicipalities.includes(local.municipalityId || '');
+  if (!inScope) return 'quarantine';
+  if (['pending', 'syncing', 'conflict', 'error'].includes(local.syncStatus)) return 'keep';
+  return 'delete';
+}
 
 async function compressAndUploadPhoto(dataUrl: string, uid: string, recordId: string, index: number): Promise<string> {
   const image = new Image();
@@ -85,6 +95,10 @@ export async function uploadQueueItem(item: SyncQueueItem): Promise<UploadResult
       const technicianOwn = account.role === 'TECNICO' && payload.technicianAuthUid === actor.uid && assigned;
       const supervisorReview = account.role === 'SUPERVISOR' && item.action === 'update' && assigned;
       if (!privileged && !technicianOwn && !supervisorReview) return { ok: false, kind: 'permission', message: 'La respuesta no pertenece a las asignaciones vigentes de esta cuenta.' };
+    }
+    const preflight = await getDoc(ref);
+    if (preflight.exists() && preflight.data().lastOperationId === item.idempotencyKey) {
+      return { ok: true, revision: Number(preflight.data().cloudRevision || 1) };
     }
     const payloadWithUploadedPhotos = await uploadInlinePhotos(payload, actor.uid, item.recordId);
     return await runTransaction(firestoreDb, async (transaction) => {
@@ -157,17 +171,26 @@ export async function syncCloudWithLocal(): Promise<{ uploaded: number; download
       console.warn('Aviso lectura questionnaireResponses en nube:', err);
       return { docs: [] } as any;
   });
-  const [cloudProducers, cloudResponses] = await Promise.all([fetchProducersFromCloud(), safeResponsePromise]);
+  let producerQuerySucceeded = false;
+  const producerPromise = fetchProducersFromCloud().then((records) => {
+    producerQuerySucceeded = true;
+    return records;
+  }).catch((error) => {
+    console.warn('Aviso lectura producers en nube:', error);
+    errors++;
+    return [] as Producer[];
+  });
+  const [cloudProducers, cloudResponses] = await Promise.all([producerPromise, safeResponsePromise]);
   const allowedProducerIds = new Set(cloudProducers.map((producer) => producer.id));
   const allowedResponseIds = new Set(cloudResponses.docs.map((snapshot: any) => snapshot.id));
   const isPrivilegedWriter = Boolean(account && ['SUPERADMIN', 'ADMINISTRADOR'].includes(account.role));
-  for (const local of await db.producers.toArray()) {
+  if (producerQuerySucceeded) for (const local of await db.producers.toArray()) {
     if (allowedProducerIds.has(local.id)) continue;
-    if (local.syncStatus === 'pending' || local.syncStatus === 'syncing' || local.syncStatus === 'conflict' || local.syncStatus === 'error') {
-      if (!isPrivilegedWriter && !municipalities.includes(local.municipalityId || '')) {
+    const decision = decideMissingProducer(local, producerQuerySucceeded, isPrivilegedWriter, municipalities);
+    if (decision === 'keep') continue;
+    if (decision === 'quarantine') {
         await db.producers.update(local.id, { syncStatus: 'error', syncError: 'Acceso retirado; el cambio se conserva localmente para exportar o revisar.' });
         await db.syncQueue.where('recordId').equals(local.id).modify((item) => { item.status = 'failed'; item.errorKind = 'permission'; item.error = 'La cuenta ya no tiene acceso al municipio.'; });
-      }
     } else {
       await db.producers.delete(local.id);
     }
@@ -179,7 +202,8 @@ export async function syncCloudWithLocal(): Promise<{ uploaded: number; download
         await db.questionnaireResponses.update(local.id, { syncStatus: 'error' });
         await db.syncQueue.where('recordId').equals(local.id).modify((item) => { item.status = 'failed'; item.errorKind = 'permission'; item.error = 'La respuesta se conserva localmente; el acceso a su municipio ya no está vigente.'; });
       }
-    } else {
+    } else if (account && (['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR'].includes(account.role)
+      || (Array.isArray(account.assignedMunicipalities) && account.assignedMunicipalities.includes(local.municipalityId)))) {
       await db.questionnaireResponses.delete(local.id);
     }
   }
@@ -198,8 +222,11 @@ export async function syncCloudWithLocal(): Promise<{ uploaded: number; download
     const questionnaires = await getDocs(collection(firestoreDb, 'questionnaireVersions')).catch(() => null);
     if (questionnaires) for (const questionnaire of questionnaires.docs) {
       const version = questionnaire.data() as any;
-      const cached = await db.questionnaires.get(version.id);
-      if (!cached || Number(version.version) >= Number(cached.version)) await db.questionnaires.put(version);
+      if (version.status !== 'published' || !Number.isInteger(version.version) || version.version < 1) continue;
+      const publishedVersionId = `${version.id}_v${version.version}`;
+      if (!await db.publishedQuestionnaireVersions.get(publishedVersionId)) {
+        await db.publishedQuestionnaireVersions.put({ ...version, publishedVersionId });
+      }
     }
   }
   for (const cloud of cloudProducers) {

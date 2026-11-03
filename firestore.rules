@@ -3,12 +3,73 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function approved() { return signedIn() && request.auth.token.email_verified == true && profile().active == true && profile().approvalStatus == 'approved'; }
+    function approved() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && profile().active == true
+        && profile().approvalStatus == 'approved';
+    }
     function roleIn(roles) { return approved() && profile().role in roles; }
     function admin() { return roleIn(['SUPERADMIN', 'ADMINISTRADOR']); }
     function director() { return roleIn(['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR']); }
     function canAccessMunicipality(municipalityId) {
-      return director() || (approved() && profile().assignedMunicipalities is list && municipalityId in profile().assignedMunicipalities);
+      return director()
+        || (approved() && profile().assignedMunicipalities is list
+          && municipalityId in profile().assignedMunicipalities);
+    }
+    function hasOnlyProducerFields(data) {
+      return data.keys().hasOnly([
+        'id', 'dni', 'fullName', 'phone', 'email', 'isEstablishmentHead', 'producerType',
+        'observations', 'establishmentName', 'municipality', 'municipalityId', 'colonyParaje',
+        'addressReference', 'lat', 'lng', 'gpsAccuracyMeters', 'isGeolocated', 'locationMethod',
+        'locationCapturedAt', 'locationCapturedBy', 'originalLocationInput', 'tenureType', 'surfaceHa',
+        'activities', 'infrastructure', 'photoUrls', 'logoUrl', 'version', 'createdAt', 'updatedAt',
+        'createdById', 'createdByName', 'verifiedBySupervisor', 'importBatchId', 'importSourceFileName',
+        'importSheetName', 'importRowNumber', 'cloudRevision', 'lastOperationId', 'cloudUpdatedAt'
+      ]);
+    }
+    function validProducer(data, producerId) {
+      return hasOnlyProducerFields(data)
+        && data.id == producerId
+        && data.dni is string && data.dni.size() >= 5 && data.dni.size() <= 16
+        && data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 160
+        && data.municipalityId is string && data.municipalityId.size() >= 2 && data.municipalityId.size() <= 64
+        && (data.lat == null || data.lat is number)
+        && (data.lng == null || data.lng is number)
+        && data.isGeolocated is bool
+        && data.isGeolocated == (data.lat is number && data.lng is number)
+        && (data.surfaceHa == null || data.surfaceHa is number)
+        && data.createdById is string
+        && data.updatedAt is string
+        && data.cloudRevision is int && data.cloudRevision >= 1
+        && data.lastOperationId is string && data.lastOperationId.size() >= 16 && data.lastOperationId.size() <= 128;
+    }
+    function validResponse(data, responseId) {
+      return data.keys().hasOnly([
+        'id', 'questionnaireId', 'questionnaireVersion', 'questionnaireTitle', 'producerId',
+        'municipalityId', 'producerDni', 'producerName', 'technicianId', 'technicianAuthUid',
+        'technicianName', 'answers', 'status', 'observations', 'createdAt', 'updatedAt',
+        'cloudRevision', 'lastOperationId', 'cloudUpdatedAt'
+      ])
+        && data.id == responseId
+        && data.questionnaireId is string
+        && data.questionnaireVersion is int && data.questionnaireVersion >= 1
+        && data.producerId is string
+        && data.municipalityId is string
+        && data.technicianAuthUid is string
+        && data.answers is map
+        && data.status in ['draft', 'completed', 'validated', 'observed']
+        && data.updatedAt is string
+        && data.cloudRevision is int && data.cloudRevision >= 1
+        && data.lastOperationId is string && data.lastOperationId.size() >= 16 && data.lastOperationId.size() <= 128;
+    }
+    function responseProducerMatches(data) {
+      return exists(/databases/$(database)/documents/producers/$(data.producerId))
+        && get(/databases/$(database)/documents/producers/$(data.producerId)).data.municipalityId == data.municipalityId;
+    }
+    function incrementsRevision() {
+      return resource.data.cloudRevision is int
+        && request.resource.data.cloudRevision == resource.data.cloudRevision + 1;
     }
 
     match /users/{uid} {
@@ -19,46 +80,75 @@ service cloud.firestore {
 
     match /producers/{producerId} {
       allow get, list: if canAccessMunicipality(resource.data.municipalityId);
-      allow create: if approved() && roleIn(['SUPERADMIN', 'ADMINISTRADOR', 'TECNICO'])
-        && (admin() || (request.resource.data.createdById == request.auth.uid && canAccessMunicipality(request.resource.data.municipalityId)));
-      allow update: if approved() && (admin() || (roleIn(['TECNICO'])
-        && request.resource.data.createdById == resource.data.createdById
-        && request.resource.data.municipalityId == resource.data.municipalityId
-        && canAccessMunicipality(resource.data.municipalityId)
-        && request.resource.data.verifiedBySupervisor == resource.data.verifiedBySupervisor));
+      allow create: if validProducer(request.resource.data, producerId)
+        && approved()
+        && (admin() || (roleIn(['TECNICO'])
+          && request.resource.data.createdById == request.auth.uid
+          && canAccessMunicipality(request.resource.data.municipalityId)));
+      allow update: if validProducer(request.resource.data, producerId)
+        && incrementsRevision()
+        && approved()
+        && (admin() || (roleIn(['TECNICO'])
+          && request.resource.data.createdById == resource.data.createdById
+          && request.resource.data.municipalityId == resource.data.municipalityId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.createdByName == resource.data.createdByName
+          && request.resource.data.verifiedBySupervisor == resource.data.verifiedBySupervisor
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'dni', 'fullName', 'phone', 'email', 'isEstablishmentHead', 'producerType', 'observations',
+            'establishmentName', 'colonyParaje', 'addressReference', 'lat', 'lng', 'gpsAccuracyMeters',
+            'isGeolocated', 'locationMethod', 'locationCapturedAt', 'locationCapturedBy', 'originalLocationInput',
+            'tenureType', 'surfaceHa', 'activities', 'infrastructure', 'photoUrls', 'logoUrl', 'version',
+            'updatedAt', 'cloudRevision', 'lastOperationId', 'cloudUpdatedAt'
+          ])
+          && canAccessMunicipality(resource.data.municipalityId)));
       allow delete: if admin();
     }
 
     match /questionnaireResponses/{responseId} {
-      allow get, list: if approved() && (director() || resource.data.technicianAuthUid == request.auth.uid
-        && canAccessMunicipality(resource.data.municipalityId)
-        || (roleIn(['SUPERVISOR']) && canAccessMunicipality(resource.data.municipalityId)));
-      allow create: if approved() && roleIn(['TECNICO'])
+      allow get, list: if approved() && (
+        director()
+        || (roleIn(['SUPERVISOR']) && canAccessMunicipality(resource.data.municipalityId))
+        || (roleIn(['TECNICO']) && resource.data.technicianAuthUid == request.auth.uid
+          && canAccessMunicipality(resource.data.municipalityId))
+      );
+      allow create: if validResponse(request.resource.data, responseId)
+        && roleIn(['TECNICO'])
         && request.resource.data.technicianAuthUid == request.auth.uid
-        && request.resource.data.municipalityId is string
-        && canAccessMunicipality(request.resource.data.municipalityId);
-      allow update: if approved() && (admin() || (roleIn(['TECNICO'])
-        && resource.data.technicianAuthUid == request.auth.uid
-        && request.resource.data.technicianAuthUid == request.auth.uid
-        && request.resource.data.status == resource.data.status
-        && request.resource.data.municipalityId == resource.data.municipalityId
-        && request.resource.data.producerId == resource.data.producerId
-        && request.resource.data.questionnaireId == resource.data.questionnaireId
-        && request.resource.data.questionnaireVersion == resource.data.questionnaireVersion
-        && canAccessMunicipality(resource.data.municipalityId))
-        || (roleIn(['SUPERVISOR']) && canAccessMunicipality(resource.data.municipalityId)
+        && request.resource.data.status in ['draft', 'completed']
+        && canAccessMunicipality(request.resource.data.municipalityId)
+        && responseProducerMatches(request.resource.data);
+      allow update: if validResponse(request.resource.data, responseId)
+        && incrementsRevision()
+        && approved()
+        && (admin() || (roleIn(['TECNICO'])
+          && resource.data.technicianAuthUid == request.auth.uid
           && request.resource.data.technicianAuthUid == resource.data.technicianAuthUid
           && request.resource.data.municipalityId == resource.data.municipalityId
-          && request.resource.data.answers == resource.data.answers
           && request.resource.data.producerId == resource.data.producerId
           && request.resource.data.questionnaireId == resource.data.questionnaireId
-          && request.resource.data.status in ['validated', 'observed']));
+          && request.resource.data.questionnaireVersion == resource.data.questionnaireVersion
+          && request.resource.data.technicianId == resource.data.technicianId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'answers', 'observations', 'updatedAt', 'cloudRevision', 'lastOperationId', 'cloudUpdatedAt'
+          ])
+          && canAccessMunicipality(resource.data.municipalityId))
+          || (roleIn(['SUPERVISOR'])
+            && canAccessMunicipality(resource.data.municipalityId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'observations', 'updatedAt', 'cloudRevision', 'lastOperationId', 'cloudUpdatedAt'
+            ])
+            && request.resource.data.status in ['validated', 'observed']));
       allow delete: if admin();
     }
 
     match /questionnaires/{questionnaireId} {
-      allow read: if approved();
-      allow write: if admin();
+      // Drafts and publication metadata are accessed only through trusted callables.
+      // Published, immutable documents are exposed separately below.
+      allow read: if admin();
+      allow write: if false;
     }
 
     match /questionnaireVersions/{versionId} {

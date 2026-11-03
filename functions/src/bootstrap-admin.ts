@@ -1,14 +1,11 @@
-import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { adminApp, firestore } from './firebaseAdmin.js';
 
 const uid = process.argv[2];
 if (!uid) throw new Error('Usage: npm run bootstrap-admin -- <verified-firebase-uid>');
 
-initializeApp({ projectId: 'gen-lang-client-0928991490' });
-const user = await getAuth().getUser(uid);
+const user = await getAuth(adminApp).getUser(uid);
 if (!user.emailVerified || !user.email) throw new Error('The Firebase account must have a verified email address.');
-const firestore = getFirestore('ai-studio-sipmisionessiste-84140521-dd09-4717-8340-b1ed25aa1dd7');
 const ref = firestore.doc(`users/${uid}`);
 await ref.create({
   id: uid,

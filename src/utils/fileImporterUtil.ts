@@ -123,10 +123,10 @@ export async function parseAndImportProducerFile(
           municipality: String(row.municipality),
           colonyParaje: String(row.colonyParaje || ''),
           addressReference: String(row.addressReference || ''),
-          lat: Number.isFinite(Number(row.lat)) && Number(row.lat) !== 0 ? Number(row.lat) : null,
-          lng: Number.isFinite(Number(row.lng)) && Number(row.lng) !== 0 ? Number(row.lng) : null,
+          lat: row.lat == null || row.lat === '' || !Number.isFinite(Number(row.lat)) ? null : Number(row.lat),
+          lng: row.lng == null || row.lng === '' || !Number.isFinite(Number(row.lng)) ? null : Number(row.lng),
           municipalityId: municipalityId(String(row.municipality)),
-          isGeolocated: Boolean(Number.isFinite(Number(row.lat)) && Number(row.lat) !== 0 && Number.isFinite(Number(row.lng)) && Number(row.lng) !== 0),
+          isGeolocated: row.lat != null && row.lat !== '' && Number.isFinite(Number(row.lat)) && row.lng != null && row.lng !== '' && Number.isFinite(Number(row.lng)),
           tenureType: row.tenureType || null,
           surfaceHa: row.surfaceHa == null || row.surfaceHa === '' || !Number.isFinite(Number(row.surfaceHa)) || Number(row.surfaceHa) < 0 ? null : Number(row.surfaceHa),
           activities: Array.isArray(row.activities) ? row.activities : [],
@@ -152,14 +152,16 @@ export async function parseAndImportProducerFile(
       // Si no tiene al menos DNI o Nombre, omitir fila vacía
       if (!rawDni && !rawName) continue;
 
-      const dni = rawDni || `DNI-S-${Date.now().toString().slice(-6)}-${i}`;
-      const fullName = rawName || `Productor ${dni}`;
+      if (!rawDni || !rawName) throw new Error(`La fila ${i + 1} no contiene DNI y nombre; no se inventaron datos para completar el registro.`);
+      const dni = rawDni;
+      const fullName = rawName;
       const phone = String(mapPhone ? row[mapPhone] : row.phone || '').trim();
       const email = String(mapEmail ? row[mapEmail] : row.email || '').trim();
-      const establishmentName = String(mapEst ? row[mapEst] : row.establishmentName || `Chacra de ${fullName}`).trim();
+      const establishmentName = String(mapEst ? row[mapEst] : row.establishmentName || '').trim();
       const rawMun = String(mapMun ? row[mapMun] : row.municipality || '').trim();
       const colonyParaje = String(mapCol ? row[mapCol] : row.colonyParaje || '').trim();
-      const rawSurface = parseFloat(String(mapSurface ? row[mapSurface] : row.surfaceHa ?? '').replace(',', '.').replace(/[^0-9.]/g, ''));
+      const rawSurfaceText = String(mapSurface ? row[mapSurface] ?? '' : row.surfaceHa ?? '').trim();
+      const rawSurface = rawSurfaceText === '' ? Number.NaN : parseFloat(rawSurfaceText.replace(',', '.').replace(/[^0-9.]/g, ''));
       const surfaceHa = isNaN(rawSurface) || rawSurface < 0 ? null : rawSurface;
       const rawAct = String(mapAct ? row[mapAct] : row.activityType || '').trim();
       const observations = String(mapNotes ? row[mapNotes] : row.observations || '').trim();
@@ -176,7 +178,7 @@ export async function parseAndImportProducerFile(
       // Coordenadas
       let lat = parseFloat(String(mapLat ? row[mapLat] : row.lat || '').replace(',', '.'));
       let lng = parseFloat(String(mapLng ? row[mapLng] : row.lng || '').replace(',', '.'));
-      let isGeolocated = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0 && isCoordinateInMisionesRange(lat, lng);
+      let isGeolocated = Number.isFinite(lat) && Number.isFinite(lng) && isCoordinateInMisionesRange(lat, lng);
 
       if (!isGeolocated) { lat = NaN; lng = NaN; }
 
@@ -189,8 +191,8 @@ export async function parseAndImportProducerFile(
       const activity: ProductiveActivity = {
         id: `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         producerId: '',
-        type: catalogMatch?.type || 'yerba_mate',
-        title: catalogMatch?.name || rawAct || 'Yerba Mate',
+        type: catalogMatch?.type || 'otros',
+        title: catalogMatch?.name || rawAct,
         surfaceHa,
         specificData: { origen: 'Carga de archivo exterior' },
         createdAt: now
@@ -217,7 +219,7 @@ export async function parseAndImportProducerFile(
         lat: Number.isFinite(lat) ? lat : null,
         lng: Number.isFinite(lng) ? lng : null,
         isGeolocated,
-        locationMethod: isGeolocated ? 'manual_coords' : 'not_georeferenced',
+        locationMethod: isGeolocated ? 'manual_coords' : undefined,
         tenureType: null,
         surfaceHa,
         activities: rawAct ? [activity] : [],
