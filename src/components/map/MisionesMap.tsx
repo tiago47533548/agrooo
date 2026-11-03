@@ -242,6 +242,7 @@ export const MisionesMap: React.FC<MisionesMapProps> = ({
     // Draw Heatmap / Concentration buffers if enabled
     if (showDensityHeatmap) {
       filtered.forEach((p) => {
+        if (typeof p.lat !== 'number' || !Number.isFinite(p.lat) || typeof p.lng !== 'number' || !Number.isFinite(p.lng)) return;
         const primaryAct = p.activities?.[0]?.type || 'yerba_mate';
         const cat = PRODUCTIVE_ACTIVITIES_CATALOG.find((c) => c.type === primaryAct);
         const heatColor = cat?.color || '#27865A';
@@ -262,6 +263,7 @@ export const MisionesMap: React.FC<MisionesMapProps> = ({
 
     // Draw Individual Markers
     filtered.forEach((producer) => {
+      if (typeof producer.lat !== 'number' || !Number.isFinite(producer.lat) || typeof producer.lng !== 'number' || !Number.isFinite(producer.lng)) return;
       const primaryAct = producer.activities?.[0]?.type || 'yerba_mate';
       const cat = PRODUCTIVE_ACTIVITIES_CATALOG.find((c) => c.type === primaryAct);
       const pinColor = cat?.color || '#27865A';
@@ -677,7 +679,7 @@ export const MisionesMap: React.FC<MisionesMapProps> = ({
 
           <div className="mt-3 flex items-center justify-between pt-2 border-t border-slate-100">
             <span className="text-[11px] font-mono text-slate-500">
-              {activeProducer.lat.toFixed(4)}, {activeProducer.lng.toFixed(4)}
+              {Number.isFinite(activeProducer.lat) && Number.isFinite(activeProducer.lng) ? `${activeProducer.lat!.toFixed(4)}, ${activeProducer.lng!.toFixed(4)}` : 'Sin coordenadas registradas'}
             </span>
             <button
               onClick={() => onSelectProducer?.(activeProducer)}

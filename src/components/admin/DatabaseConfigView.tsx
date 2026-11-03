@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SIP_MISIONES_POSTGRES_SCHEMA } from '../../db/sqlExport';
 import { AuditLog, SyncQueueItem } from '../../db/schema';
-import { db } from '../../db/dexieDb';
-import { seedInitialDatabaseIfEmpty } from '../../db/seedData';
+import { db, exportLegacyLocalDatabase } from '../../db/dexieDb';
 import { useSyncEngine } from '../../hooks/useSyncEngine';
 import { 
   Database, 
@@ -29,6 +28,7 @@ export const DatabaseConfigView: React.FC = () => {
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [localProducerCount, setLocalProducerCount] = useState<number>(0);
+  const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<'sql' | 'audit' | 'queue' | 'firebase'>('firebase');
 
   useEffect(() => {
@@ -53,7 +53,6 @@ export const DatabaseConfigView: React.FC = () => {
     setIsResetting(true);
     setResetMessage(null);
     try {
-      await seedInitialDatabaseIfEmpty(true);
       try {
         const { syncCloudWithLocal } = await import('../../services/firestoreSync');
         await syncCloudWithLocal();
@@ -89,6 +88,20 @@ export const DatabaseConfigView: React.FC = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleExportBrowserData = async (legacy = false) => {
+    setIsExporting(true);
+    try {
+      const tables = legacy ? await exportLegacyLocalDatabase() : Object.fromEntries(await Promise.all(db.tables.map(async (table) => [table.name, await table.toArray()] as const)));
+      const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), tables }, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = legacy ? 'sip-misiones-datos-locales-legados.json' : 'sip-misiones-datos-locales.json';
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } finally { setIsExporting(false); }
   };
 
   return (
@@ -195,12 +208,12 @@ export const DatabaseConfigView: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-[#174C35]" />
-                  <span className="font-bold text-slate-900 text-xs">
-                    Padrón Territorial Provincial Activo: {localProducerCount} productores
+                    <span className="font-bold text-slate-900 text-xs">
+                    Datos locales de esta cuenta: {localProducerCount} productores
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-600 mt-0.5">
-                  Incluye los relevamientos cargados por los técnicos territoriales (Flia. Rodríguez, Aurelia Fernández, etc.) y cuencas productivas clave.
+                  La sincronización envía cambios pendientes de esta cuenta cuando el servidor autoriza cada registro.
                 </p>
                 {resetMessage && (
                   <div className="flex items-center gap-1.5 mt-2 text-xs font-bold text-emerald-800">
@@ -217,8 +230,12 @@ export const DatabaseConfigView: React.FC = () => {
                 className="px-4 py-2.5 bg-[#174C35] hover:bg-[#27865A] text-white font-extrabold text-xs rounded-xl shadow-xs transition active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 shrink-0 min-h-[40px]"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
-                <span>{isResetting ? 'Sincronizando...' : 'Cargar Base Territorial (14 Productores)'}</span>
+                <span>{isResetting ? 'Sincronizando...' : 'Sincronizar datos locales'}</span>
               </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={isExporting} onClick={() => void handleExportBrowserData()} className="px-3 py-2 border rounded-xl text-xs font-semibold disabled:opacity-50">Exportar datos de esta cuenta</button>
+              <button type="button" disabled={isExporting} onClick={() => void handleExportBrowserData(true)} className="px-3 py-2 border rounded-xl text-xs font-semibold disabled:opacity-50">Exportar base local heredada</button>
             </div>
           </div>
         </div>

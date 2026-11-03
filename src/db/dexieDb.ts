@@ -29,8 +29,8 @@ export class SipMisionesDatabase extends Dexie {
   users!: Table<UserProfile, string>;
   importBatches!: Table<ImportBatch, string>;
 
-  constructor() {
-    super('SipMisionesDB');
+  constructor(name = 'SipMisionesDB') {
+    super(name);
     
     this.version(1).stores({
       producers: 'id, dni, fullName, municipality, syncStatus, updatedAt, createdAt, createdById',
@@ -69,4 +69,37 @@ export class SipMisionesDatabase extends Dexie {
   }
 }
 
-export const db = new SipMisionesDatabase();
+let activeDatabase = new SipMisionesDatabase('SipMisionesDB_quarantine');
+
+export const db = new Proxy(activeDatabase, {
+  get(_target, property) {
+    const value = Reflect.get(activeDatabase, property, activeDatabase);
+    return typeof value === 'function' ? value.bind(activeDatabase) : value;
+  },
+  set(_target, property, value) {
+    return Reflect.set(activeDatabase, property, value, activeDatabase);
+  }
+}) as SipMisionesDatabase;
+
+export async function switchDatabaseForUser(uid?: string): Promise<void> {
+  const safeUid = uid ? uid.replace(/[^a-zA-Z0-9_-]/g, '_') : 'quarantine';
+  const nextName = `SipMisionesDB_${safeUid}`;
+  if (activeDatabase.name === nextName) return;
+  activeDatabase.close();
+  activeDatabase = new SipMisionesDatabase(nextName);
+  await activeDatabase.open();
+  await activeDatabase.syncQueue.where('status').equals('syncing').modify({ status: 'pending', error: 'La app se cerró durante el envío; se reintentará.' });
+}
+
+export async function exportLegacyLocalDatabase(): Promise<Record<string, unknown[]>> {
+  const legacy = new SipMisionesDatabase('SipMisionesDB');
+  try {
+    await legacy.open();
+    const entries = await Promise.all(legacy.tables.map(async (table) => [table.name, await table.toArray()] as const));
+    return Object.fromEntries(entries);
+  } catch {
+    return {};
+  } finally {
+    legacy.close();
+  }
+}

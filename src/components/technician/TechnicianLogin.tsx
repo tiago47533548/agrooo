@@ -22,8 +22,8 @@ import {
   Check
 } from 'lucide-react';
 import { GoogleAuthService } from '../../services/googleAuth';
-import { AuthService, DEMO_TECHNICIAN_CREDENTIALS } from '../../services/authService';
-import { db } from '../../db/dexieDb';
+import { AuthService } from '../../services/authService';
+import { firebaseAuth } from '../../services/firebaseClient';
 import { UserProfile } from '../../db/schema';
 
 interface TechnicianLoginProps {
@@ -42,8 +42,8 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
   const [isSubmittingCredentials, setIsSubmittingCredentials] = useState(false);
 
   // Form states
-  const [usernameInput, setUsernameInput] = useState('tecnico.prueba@agro.misiones.gob.ar');
-  const [passwordInput, setPasswordInput] = useState('Tecnico2026!');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -74,30 +74,6 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
     }
   };
 
-  // Carga automática con 1 clic del perfil de prueba
-  const handleOneClickDemoLogin = async () => {
-    setUsernameInput(DEMO_TECHNICIAN_CREDENTIALS.username);
-    setPasswordInput(DEMO_TECHNICIAN_CREDENTIALS.password);
-    setIsSubmittingCredentials(true);
-    setGeneralError(null);
-
-    try {
-      const res = await AuthService.loginWithCredentials(
-        DEMO_TECHNICIAN_CREDENTIALS.username,
-        DEMO_TECHNICIAN_CREDENTIALS.password
-      );
-      if (res.success && res.user) {
-        onLoginSuccess(res.user);
-      } else {
-        setGeneralError(res.error || 'Error al inicializar sesión de prueba');
-      }
-    } catch (err: any) {
-      setGeneralError(err?.message || 'Error al conectar perfil de prueba');
-    } finally {
-      setIsSubmittingCredentials(false);
-    }
-  };
-
   // Iniciar sesión con Google
   const handleGoogleLogin = async () => {
     setIsLoadingGoogle(true);
@@ -111,6 +87,10 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
       } else if (res.status === 'unregistered' && res.email) {
         setUnregisteredEmail(res.email);
         setGeneralError(res.error || 'Tu cuenta de Google no se encuentra registrada como técnico territorial.');
+      } else if ((res.status === 'pending' || res.status === 'rejected') && res.user) {
+        setStatusCheckResult({ found: true, user: res.user, status: res.status });
+        setStatusCheckEmail(res.email || '');
+        setGeneralError(res.error || 'Tu solicitud todavía no está aprobada.');
       } else if (res.error) {
         setGeneralError(res.error);
       }
@@ -136,24 +116,13 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
 
     try {
       const email = statusCheckEmail.trim().toLowerCase();
-      const user = await db.users.where('email').equalsIgnoreCase(email).first();
-
-      if (!user) {
-        setStatusCheckResult({
-          found: false,
-          message: 'No se encontró ninguna solicitud registrada para este correo.'
-        });
-      } else {
-        setStatusCheckResult({
-          found: true,
-          user,
-          status: user.approvalStatus || (user.active ? 'approved' : 'pending')
-        });
-      }
-    } catch {
+      if (!firebaseAuth.currentUser || firebaseAuth.currentUser.email?.toLowerCase() !== email) throw new Error('Iniciá sesión con Google con ese correo para consultar su estado.');
+      const status = await AuthService.getTechnicianApplicationStatus();
+      setStatusCheckResult({ found: status !== 'unregistered', status, message: status === 'unregistered' ? 'No se encontró una solicitud para esta cuenta.' : status === 'disabled' ? 'La cuenta fue deshabilitada por un administrador.' : undefined });
+    } catch (error: any) {
       setStatusCheckResult({
         found: false,
-        message: 'Error al consultar la base de datos local.'
+        message: error?.message || 'No se pudo consultar el estado de la solicitud.'
       });
     } finally {
       setIsCheckingStatus(false);
@@ -220,75 +189,6 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
               </div>
             )}
 
-            {/* Test Credentials Highlight Card */}
-            <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#174C35]">
-                  <Sparkles className="w-4 h-4 text-emerald-600" />
-                  <span>Perfil de Prueba para Técnicos</span>
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-200/60 text-[#174C35] px-2 py-0.5 rounded-full">
-                  Acceso Inmediato
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                <div className="bg-white p-2.5 rounded-xl border border-emerald-200/70 shadow-2xs">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Usuario</span>
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="font-mono text-[11px] text-slate-800 truncate font-semibold" title={DEMO_TECHNICIAN_CREDENTIALS.username}>
-                      {DEMO_TECHNICIAN_CREDENTIALS.username}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyText(DEMO_TECHNICIAN_CREDENTIALS.username, 'user')}
-                      className="text-slate-400 hover:text-emerald-700 p-1 shrink-0 cursor-pointer"
-                      title="Copiar usuario"
-                    >
-                      {copiedKey === 'user' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-white p-2.5 rounded-xl border border-emerald-200/70 shadow-2xs">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Contraseña</span>
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="font-mono text-[11px] text-slate-800 font-bold">
-                      {DEMO_TECHNICIAN_CREDENTIALS.password}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyText(DEMO_TECHNICIAN_CREDENTIALS.password, 'pass')}
-                      className="text-slate-400 hover:text-emerald-700 p-1 shrink-0 cursor-pointer"
-                      title="Copiar contraseña"
-                    >
-                      {copiedKey === 'pass' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 1-Click Fast Demo Login CTA */}
-              <button
-                type="button"
-                onClick={handleOneClickDemoLogin}
-                disabled={isSubmittingCredentials}
-                className="w-full py-2.5 px-3 bg-[#174C35] hover:bg-[#1f6647] active:scale-[0.99] text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {isSubmittingCredentials ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Iniciando sesión...</span>
-                  </>
-                ) : (
-                  <>
-                    <Key className="w-3.5 h-3.5 text-emerald-300" />
-                    <span>Entrar con Perfil de Prueba en 1 clic</span>
-                  </>
-                )}
-              </button>
-            </div>
-
             {/* Tab switch between Password & Google */}
             <div className="flex p-1 bg-slate-100 rounded-xl">
               <button
@@ -341,6 +241,8 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
                     />
                   </div>
                 </div>
+
+                <button type="button" onClick={() => AuthService.resetPassword(usernameInput).then(() => setGeneralError('Si la cuenta existe, recibirás un correo para restablecer la contraseña.')).catch((error) => setGeneralError(error.message))} className="text-[11px] font-semibold text-slate-600 underline">Olvidé mi contraseña</button>
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -490,23 +392,23 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
                       {statusCheckResult.found ? (
                         <div>
                           <div className="flex items-center justify-between">
-                            <span className="font-bold">{statusCheckResult.user.fullName}</span>
+                            <span className="font-bold">{statusCheckResult.user?.fullName || statusCheckEmail}</span>
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
                               statusCheckResult.status === 'approved' ? 'bg-emerald-100 text-emerald-800' :
-                              statusCheckResult.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                              statusCheckResult.status === 'rejected' || statusCheckResult.status === 'disabled' ? 'bg-red-100 text-red-800' :
                               'bg-amber-100 text-amber-800'
                             }`}>
                               {statusCheckResult.status === 'approved' ? 'Aprobada' :
-                               statusCheckResult.status === 'rejected' ? 'Rechazada' : 'En Revisión'}
+                               statusCheckResult.status === 'rejected' ? 'Rechazada' : statusCheckResult.status === 'disabled' ? 'Deshabilitada' : 'En Revisión'}
                             </span>
                           </div>
                           {statusCheckResult.status === 'approved' && (
                             <button
                               type="button"
-                              onClick={handleOneClickDemoLogin}
+                              onClick={() => setActiveTab('google')}
                               className="mt-2 text-[#174C35] font-bold underline cursor-pointer"
                             >
-                              ¡Tu cuenta está aprobada! Ingresá haciendo clic acá.
+                              Tu cuenta está aprobada. Iniciá sesión con Google.
                             </button>
                           )}
                         </div>

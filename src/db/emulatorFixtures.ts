@@ -1275,12 +1275,15 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
 ];
 
 export async function seedInitialDatabaseIfEmpty(forceReload: boolean = false) {
+  if (!import.meta.env.DEV || import.meta.env.VITE_USE_FIREBASE_EMULATORS !== 'true' || import.meta.env.VITE_LOAD_DEMO_DATA !== 'true') {
+    throw new Error('Demo seeding is disabled. Enable VITE_LOAD_DEMO_DATA only in a local emulator session.');
+  }
   try {
     console.log('[SIP MISIONES] Verificando y cargando base de datos territorial provincial...');
 
     // 1. Asegurar usuarios y cuentas autorizadas
     for (const u of INITIAL_USERS) {
-      await db.users.put(u);
+      if (!(await db.users.get(u.id))) await db.users.put(u);
     }
 
     // 2. Asegurar cuestionarios

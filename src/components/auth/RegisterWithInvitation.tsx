@@ -1,18 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Invitation, UserProfile, UserRole } from '../../db/schema';
-import { db } from '../../db/dexieDb';
+import { Invitation, UserProfile } from '../../db/schema';
+import { AuthService } from '../../services/authService';
+import { firebaseAuth } from '../../services/firebaseClient';
 import { SipLogo } from '../brand/SipLogo';
 import { 
-  Key, 
-  CheckCircle2, 
+  Key,
   AlertCircle, 
-  UserCheck, 
-  ArrowRight, 
-  Shield, 
   Lock,
-  Mail,
-  User,
-  Phone,
+  UserCheck,
   ArrowLeft
 } from 'lucide-react';
 
@@ -39,6 +34,7 @@ export const RegisterWithInvitation: React.FC<RegisterWithInvitationProps> = ({
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
 
   // Auto-validate if code is provided in URL
   useEffect(() => {
@@ -53,32 +49,9 @@ export const RegisterWithInvitation: React.FC<RegisterWithInvitationProps> = ({
     setErrorMsg(null);
 
     try {
-      const inv = await db.invitations.where('code').equalsIgnoreCase(codeToTest.trim()).first();
-      if (!inv) {
-        setErrorMsg('El código de invitación no existe en el sistema.');
-        setInvitation(null);
-        return;
-      }
-
-      if (inv.status === 'revocada') {
-        setErrorMsg('Esta invitación ha sido revocada por un administrador.');
-        setInvitation(null);
-        return;
-      }
-
-      if (new Date(inv.expiresAt) < new Date()) {
-        setErrorMsg('Esta invitación ha expirado.');
-        setInvitation(null);
-        return;
-      }
-
-      if (inv.usedCount >= inv.maxUses) {
-        setErrorMsg('Esta invitación ha alcanzado el límite máximo de registros permitidos.');
-        setInvitation(null);
-        return;
-      }
-
-      setInvitation(inv);
+      const inv = await AuthService.validateTechnicianInvitation(codeToTest);
+      if (inv.emailAllowed) setEmail(inv.emailAllowed);
+      setInvitation({ id: '', code: inv.code, role: inv.role, emailAllowed: inv.emailAllowed || undefined, maxUses: 1, usedCount: 0, expiresAt: inv.expiresAt, status: 'activa', createdBy: '', createdByName: '', createdAt: '' });
     } catch (e: any) {
       setErrorMsg(`Error al validar invitación: ${e.message}`);
     } finally {
@@ -97,47 +70,22 @@ export const RegisterWithInvitation: React.FC<RegisterWithInvitationProps> = ({
 
     setIsSubmitting(true);
     try {
-      const now = new Date().toISOString();
-      const newUser: UserProfile = {
-        id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        dni: dni.trim(),
-        fullName: fullName.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        role: invitation.role,
-        active: true,
-        createdAt: now,
-        updatedAt: now
-      };
-
-      // 1. Add user to Dexie
-      await db.users.put(newUser);
-
-      // 2. Increment invitation usage
-      const newUsedCount = invitation.usedCount + 1;
-      const newStatus = newUsedCount >= invitation.maxUses ? 'utilizada' : 'activa';
-      await db.invitations.update(invitation.id, {
-        usedCount: newUsedCount,
-        status: newStatus
-      });
-
-      // 3. Log audit event
-      await db.auditLogs.add({
-        id: `audit_${Date.now()}`,
-        userId: newUser.id,
-        userName: newUser.fullName,
-        userRole: newUser.role,
-        action: 'REGISTER_VIA_INVITATION',
-        entity: 'users',
-        entityId: newUser.id,
-        details: `Registro completado con invitación ${invitation.code} con rol ${newUser.role}`,
-        device: 'Web Client / Registration',
-        timestamp: now
-      });
-
+      const currentUser = firebaseAuth.currentUser;
+      if (!currentUser) {
+        try {
+          await AuthService.createPasswordAccount(email, password, fullName);
+          setVerificationSent(true);
+          return;
+        } catch (createError: any) {
+          if (createError?.code !== 'auth/email-already-in-use') throw createError;
+          await AuthService.signInForInvitation(email, password);
+        }
+      }
+      if (firebaseAuth.currentUser?.email?.toLowerCase() !== email.trim().toLowerCase()) throw new Error('El correo de la cuenta debe coincidir con el correo del formulario.');
+      const newUser = await AuthService.redeemTechnicianInvitation({ code: invitation.code, fullName, dni, phone });
       onSuccessLogin(newUser);
     } catch (err: any) {
-      alert(`Error en el registro: ${err.message}`);
+      setErrorMsg(err?.message || 'No se pudo completar el registro.');
     } finally {
       setIsSubmitting(false);
     }
@@ -206,6 +154,8 @@ export const RegisterWithInvitation: React.FC<RegisterWithInvitationProps> = ({
           {/* Step 2: Valid invitation verified, show registration form */}
           {invitation && (
             <form onSubmit={handleRegister} className="space-y-4">
+              {verificationSent && <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900">Te enviamos un correo de verificación. Abrilo y luego volvé a enviar este formulario para completar el registro.{firebaseAuth.currentUser && !firebaseAuth.currentUser.emailVerified && <button type="button" className="ml-1 underline font-bold" onClick={() => AuthService.resendVerificationEmail().then(() => setErrorMsg('Correo de verificación reenviado.')).catch((error) => setErrorMsg(error.message))}>Reenviar correo</button>}</div>}
+              {errorMsg && <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">{errorMsg}</div>}
               <div className="p-3.5 bg-[#E8F2EA]/70 border border-[#27865A]/30 rounded-2xl flex items-center justify-between text-xs">
                 <div>
                   <span className="text-[10px] uppercase font-bold text-[#27865A] block">
@@ -273,6 +223,7 @@ export const RegisterWithInvitation: React.FC<RegisterWithInvitationProps> = ({
                   type="email"
                   required
                   value={email}
+                  readOnly={Boolean(invitation.emailAllowed)}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="ejemplo@misiones.gob.ar"
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-[#27865A]"

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ProtectedImage } from '../common/ProtectedImage';
 import { 
   Producer, 
   ProductiveActivity, 
@@ -12,10 +13,11 @@ import {
   ActivityCatalogItem 
 } from '../../db/misionesCatalog';
 import { db } from '../../db/dexieDb';
+import { municipalityId } from '../../utils/municipality';
 import { syncEngine } from '../../services/syncEngine';
 import { MisionesMap } from '../map/MisionesMap';
 import { SharedLocationPicker } from './SharedLocationPicker';
-import { compressChacraLogo } from '../../utils/imageCompressor';
+import { compressCapturedImage, compressChacraLogo } from '../../utils/imageCompressor';
 import { 
   User, 
   MapPin, 
@@ -70,46 +72,17 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
     producerType: editProducer?.producerType || 'pequeno_familiar',
     establishmentName: editProducer?.establishmentName || '',
     logoUrl: editProducer?.logoUrl || '',
-    municipality: editProducer?.municipality || 'Oberá',
+    municipality: editProducer?.municipality || '',
     colonyParaje: editProducer?.colonyParaje || '',
     addressReference: editProducer?.addressReference || '',
-    lat: editProducer?.lat || -27.4862,
-    lng: editProducer?.lng || -55.1205,
-    gpsAccuracyMeters: editProducer?.gpsAccuracyMeters || 10,
-    tenureType: editProducer?.tenureType || 'propiedad_con_titulo',
-    surfaceHa: editProducer?.surfaceHa || 15,
+    lat: editProducer?.lat ?? null,
+    lng: editProducer?.lng ?? null,
+    gpsAccuracyMeters: editProducer?.gpsAccuracyMeters,
+    tenureType: editProducer?.tenureType,
+    surfaceHa: editProducer?.surfaceHa ?? null,
     observations: editProducer?.observations || '',
-    activities: editProducer?.activities || [
-      {
-        id: `act_${Date.now()}_1`,
-        producerId: editProducer?.id || '',
-        type: 'yerba_mate',
-        title: 'Yerba Mate',
-        surfaceHa: 10,
-        specificData: {
-          plantationAgeYears: 12,
-          productiveSystem: 'Tradicional a cielo abierto',
-          harvestFrequency: 'Zafra gruesa (Abr-Sep)',
-          cuttingMethod: 'Tijera manual tradicional',
-          destination: 'Secadero cooperativo'
-        },
-        createdAt: new Date().toISOString()
-      }
-    ],
-    infrastructure: editProducer?.infrastructure || {
-      id: `inf_${Date.now()}`,
-      producerId: editProducer?.id || '',
-      waterSource: ['vertiente_protegida'],
-      electricity: 'red_monofasica',
-      roadAccess: 'entoscado_bueno',
-      hasStorageFacility: true,
-      storageDescription: '',
-      sanitation: 'inodoro_con_camara',
-      machinery: ['Motoguadaña Stihl'],
-      irrigationSystem: 'sin_riego',
-      observations: '',
-      createdAt: new Date().toISOString()
-    },
+    activities: editProducer?.activities || [],
+    infrastructure: editProducer?.infrastructure,
     photoUrls: editProducer?.photoUrls || [],
     version: (editProducer?.version || 0) + 1,
     syncStatus: 'pending'
@@ -190,7 +163,7 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
         producerId: formData.id || '',
         type,
         title: cat?.name || type,
-        surfaceHa: 2,
+        surfaceHa: null,
         specificData: {},
         createdAt: new Date().toISOString()
       };
@@ -207,7 +180,7 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
       const updated = (prev.activities || []).map((a) => {
         if (a.type === type) {
           if (key === 'surfaceHa') {
-            return { ...a, surfaceHa: Number(value) };
+            return { ...a, surfaceHa: value === '' ? null : Number(value) };
           }
           return {
             ...a,
@@ -224,20 +197,15 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
   };
 
   // Photo capture / upload
-  const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     const file = files[0];
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      setFormData((prev) => ({
-        ...prev,
-        photoUrls: [...(prev.photoUrls || []), base64]
-      }));
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressCapturedImage(file);
+      setFormData((prev) => ({ ...prev, photoUrls: [...(prev.photoUrls || []), compressed] }));
+    } catch (error: any) { alert(error.message || 'No se pudo comprimir la foto.'); }
   };
 
   const handleRemovePhoto = (index: number) => {
@@ -293,30 +261,32 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
         producerType: formData.producerType || 'pequeno_familiar',
         establishmentName: formData.establishmentName?.trim() || 'Establecimiento sin nombre',
         logoUrl: formData.logoUrl || '',
-        municipality: formData.municipality || 'Oberá',
+        municipality: formData.municipality || '',
+        municipalityId: municipalityId(formData.municipality),
         colonyParaje: formData.colonyParaje || 'Zona rural',
         addressReference: formData.addressReference || '',
-        lat: formData.lat || -27.4862,
-        lng: formData.lng || -55.1205,
-        gpsAccuracyMeters: formData.gpsAccuracyMeters || 5,
-        isGeolocated: true,
-        locationMethod: formData.locationMethod || 'manual_map',
-        locationCapturedAt: formData.locationCapturedAt || now,
-        locationCapturedBy: formData.locationCapturedBy || technicianName,
+        lat: formData.lat ?? null,
+        lng: formData.lng ?? null,
+        gpsAccuracyMeters: formData.gpsAccuracyMeters,
+        isGeolocated: Number.isFinite(formData.lat) && Number.isFinite(formData.lng),
+        locationMethod: formData.locationMethod || 'not_georeferenced',
+        locationCapturedAt: formData.locationCapturedAt,
+        locationCapturedBy: formData.locationCapturedBy,
         originalLocationInput: formData.originalLocationInput || '',
-        tenureType: formData.tenureType || 'propiedad_con_titulo',
-        surfaceHa: Number(formData.surfaceHa) || 10,
+        tenureType: formData.tenureType ?? null,
+        surfaceHa: formData.surfaceHa == null ? null : Number(formData.surfaceHa),
         observations: formData.observations || '',
         activities: formData.activities || [],
         infrastructure: formData.infrastructure,
         photoUrls: formData.photoUrls || [],
         syncStatus: 'pending',
         version: formData.version || 1,
+        cloudRevision: editProducer?.cloudRevision,
         createdAt: editProducer?.createdAt || now,
         updatedAt: now,
         createdById: editProducer?.createdById || technicianId,
         createdByName: editProducer?.createdByName || technicianName,
-        verifiedBySupervisor: false
+        verifiedBySupervisor: editProducer?.verifiedBySupervisor ?? false
       };
 
       // Save the local record and its upload operation atomically.
@@ -567,7 +537,7 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
                 <div className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-xl">
                   {formData.logoUrl ? (
                     <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-slate-300 bg-white shrink-0 shadow-2xs">
-                      <img
+                      <ProtectedImage
                         src={formData.logoUrl}
                         alt="Logo chacra"
                         className="w-full h-full object-cover"
@@ -617,16 +587,14 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
                   value={formData.municipality}
                   onChange={(e) => {
                     const munName = e.target.value;
-                    const munInfo = MISIONES_MUNICIPALITIES.find((m) => m.name === munName);
                     setFormData({
                       ...formData,
-                      municipality: munName,
-                      lat: munInfo ? munInfo.lat : formData.lat,
-                      lng: munInfo ? munInfo.lng : formData.lng
+                      municipality: munName
                     });
                   }}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-[#27865A] focus:outline-none bg-white font-medium"
                 >
+                  <option value="">Seleccione un municipio...</option>
                   {MISIONES_MUNICIPALITIES.map((m) => (
                     <option key={m.id} value={m.name}>
                       {m.name} ({m.department})
@@ -655,8 +623,8 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
                 <input
                   type="number"
                   step="0.5"
-                  value={formData.surfaceHa}
-                  onChange={(e) => setFormData({ ...formData, surfaceHa: Number(e.target.value) })}
+                  value={formData.surfaceHa ?? ''}
+                  onChange={(e) => setFormData({ ...formData, surfaceHa: e.target.value === '' ? null : Number(e.target.value) })}
                   placeholder="Ej: 25.0"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-[#27865A] focus:outline-none font-mono"
                 />
@@ -667,10 +635,11 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
                   Régimen de Tenencia de la Tierra
                 </label>
                 <select
-                  value={formData.tenureType}
-                  onChange={(e) => setFormData({ ...formData, tenureType: e.target.value as any })}
+                  value={formData.tenureType ?? ''}
+                  onChange={(e) => setFormData({ ...formData, tenureType: (e.target.value || null) as any })}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-[#27865A] focus:outline-none bg-white"
                 >
+                  <option value="">No informado</option>
                   <option value="propiedad_con_titulo">Propiedad con Título Perfecto</option>
                   <option value="ocupacion_con_permiso">Permiso de Ocupación Fiscal</option>
                   <option value="fiscal_en_tramite">Fiscal en Trámite de Regularización</option>
@@ -767,7 +736,7 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
                         <input
                           type="number"
                           step="0.5"
-                          value={act.surfaceHa}
+                          value={act.surfaceHa ?? ''}
                           onChange={(e) => handleUpdateActivityData(act.type, 'surfaceHa', e.target.value)}
                           className="w-16 text-right font-mono text-xs focus:outline-none"
                         />
@@ -1022,7 +991,7 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
                       key={a.id}
                       className="px-2.5 py-1 rounded-lg bg-[#E8F2EA] text-[#174C35] font-semibold text-xs"
                     >
-                      {a.title} ({a.surfaceHa} ha)
+                      {a.title} ({a.surfaceHa == null ? 'Sin dato' : `${a.surfaceHa} ha`})
                     </span>
                   ))}
                 </div>
@@ -1056,7 +1025,7 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
 
                 {formData.photoUrls?.map((url, idx) => (
                   <div key={idx} className="relative w-24 h-24 rounded-2xl overflow-hidden border border-slate-200 group">
-                    <img src={url} alt={`Chacra ${idx + 1}`} className="w-full h-full object-cover" />
+                    <ProtectedImage src={url} alt={`Chacra ${idx + 1}`} className="w-full h-full object-cover" />
                     <button
                       type="button"
                       onClick={() => handleRemovePhoto(idx)}

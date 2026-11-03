@@ -7,22 +7,19 @@
  * con su contraseña real y verificación en dos pasos.
  */
 
-import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
-  getAuth, 
   signInWithPopup, 
   GoogleAuthProvider, 
   signOut as firebaseSignOut, 
   User, 
   onAuthStateChanged 
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { AuthService } from './authService';
 import { UserProfile } from '../db/schema';
+import { firebaseAuth as auth } from './firebaseClient';
 
 // Inicializar la aplicación Firebase
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
+export { auth };
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
@@ -51,7 +48,7 @@ export class GoogleAuthService {
       const firebaseUser: User = credential.user;
 
       const email = firebaseUser.email?.trim().toLowerCase();
-      if (!email) {
+      if (!email || !firebaseUser.emailVerified) {
         return {
           success: false,
           error: 'No se pudo obtener una dirección de correo verificada desde la cuenta de Google.'
@@ -61,15 +58,12 @@ export class GoogleAuthService {
       const displayName = firebaseUser.displayName || email.split('@')[0];
 
       // Validar contra el servicio de autorización ministerial (RBAC)
-      const authResult = await AuthService.authenticateWithGoogle(targetRole, email, displayName);
+      const authResult = await AuthService.authenticateWithGoogle(targetRole, email, displayName, firebaseUser.uid);
 
       if (!authResult.success) {
         // Si no está autorizado para este rol, cerrar la sesión en Firebase para no dejar rastros
-        try {
-          await firebaseSignOut(auth);
-        } catch {
-          // Ignorar
-        }
+        const keepForTechnicianStatus = targetRole === 'technician' && ['unregistered', 'pending', 'rejected'].includes(String(authResult.status));
+        if (!keepForTechnicianStatus) await firebaseSignOut(auth).catch(() => undefined);
 
         return {
           success: false,
@@ -87,6 +81,7 @@ export class GoogleAuthService {
       };
     } catch (error: any) {
       console.error('Error durante la autenticación con Google:', error);
+      if (auth.currentUser) await firebaseSignOut(auth).catch(() => undefined);
 
       if (error.code === 'auth/popup-closed-by-user') {
         return {

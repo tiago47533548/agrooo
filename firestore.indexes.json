@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "questionnaireResponses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "technicianAuthUid", "order": "ASCENDING" },
+        { "fieldPath": "municipalityId", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

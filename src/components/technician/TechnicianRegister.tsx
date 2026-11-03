@@ -13,41 +13,14 @@ import {
   Send
 } from 'lucide-react';
 import { AuthService } from '../../services/authService';
+import { GoogleAuthService } from '../../services/googleAuth';
+import { MISIONES_MUNICIPALITIES } from '../../db/misionesCatalog';
 
 interface TechnicianRegisterProps {
   initialEmail?: string;
   onBackToLogin: () => void;
   onRegistrationComplete: () => void;
 }
-
-const MISIONES_MUNICIPALITIES = [
-  'Oberá',
-  'Posadas',
-  'Eldorado',
-  'San Vicente',
-  'Apóstoles',
-  'Leandro N. Alem',
-  'Puerto Rico',
-  'Aristóbulo del Valle',
-  'San Pedro',
-  'Montecarlo',
-  'Campo Viera',
-  'Campo Grande',
-  'Jardín América',
-  '2 de Mayo',
-  'San Ignacio',
-  'Bernardo de Irigoyen',
-  'Comandante Andresito',
-  'El Soberbio',
-  'Wanda',
-  'Capioví',
-  'Alba Posse',
-  'Concepción de la Sierra',
-  'San Javier',
-  'Cuenca Centro / Yerba Mate',
-  'Cuenca Alto Uruguay / Tabaco',
-  'Cuenca Norte / Forestal'
-];
 
 export const TechnicianRegister: React.FC<TechnicianRegisterProps> = ({
   initialEmail = '',
@@ -82,6 +55,15 @@ export const TechnicianRegister: React.FC<TechnicianRegisterProps> = ({
 
     setIsSubmitting(true);
     try {
+      const google = await GoogleAuthService.signInWithGoogle('technician');
+      if (google.status !== 'unregistered') {
+        setErrorMessage(google.success ? 'Esta cuenta ya está aprobada. Volvé al acceso de técnicos.' : google.error || 'Esta cuenta ya tiene una solicitud en el sistema.');
+        return;
+      }
+      if (google.email?.toLowerCase() !== email.trim().toLowerCase()) {
+        setErrorMessage('El correo del formulario debe coincidir con la cuenta Google verificada.');
+        return;
+      }
       const res = await AuthService.registerTechnicianRequest({
         email,
         fullName,
@@ -273,8 +255,8 @@ export const TechnicianRegister: React.FC<TechnicianRegisterProps> = ({
                   className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#174C35]"
                 >
                   {MISIONES_MUNICIPALITIES.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
+                    <option key={m.id} value={m.name}>
+                      {m.name}
                     </option>
                   ))}
                 </select>

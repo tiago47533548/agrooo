@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, Producer } from '../../db/schema';
 import { db } from '../../db/dexieDb';
+import { collection, getDocs } from 'firebase/firestore';
+import { firebaseDb } from '../../services/firebaseClient';
+import { MISIONES_MUNICIPALITIES } from '../../db/misionesCatalog';
 import { AuthService } from '../../services/authService';
 import { 
   Users, 
@@ -32,12 +35,13 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
   const [selectedMunicipality, setSelectedMunicipality] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string[]>>({});
 
   const loadTechnicians = async () => {
     setIsLoading(true);
     try {
-      const allUsers = await db.users.toArray();
-      const techs = allUsers.filter((u) => u.role === 'TECNICO');
+      const snapshot = await getDocs(collection(firebaseDb, 'users'));
+      const techs = snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id } as UserProfile)).filter((u) => u.role === 'TECNICO');
       setTechnicians(techs);
 
       // Count surveys for each
@@ -64,7 +68,12 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
   }, []);
 
   const handleApprove = async (tech: UserProfile) => {
-    const ok = await AuthService.approveTechnician(tech.id, currentAdmin);
+    const assignedMunicipalities = assignmentDrafts[tech.id] || [];
+    if (!assignedMunicipalities.length) {
+      setActionNotice('Elegí al menos un municipio antes de aprobar la cuenta.');
+      return;
+    }
+    const ok = await AuthService.approveTechnician(tech.id, currentAdmin, assignedMunicipalities);
     if (ok) {
       setActionNotice(`Cuenta técnica aprobada para ${tech.fullName}`);
       loadTechnicians();
@@ -82,12 +91,22 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
   };
 
   const handleToggleActive = async (tech: UserProfile) => {
-    tech.active = !tech.active;
-    tech.updatedAt = new Date().toISOString();
-    await db.users.put(tech);
-    setActionNotice(`Estado de ${tech.fullName} actualizado a ${tech.active ? 'Activo' : 'Inactivo'}`);
+    const nextActive = !tech.active;
+    const ok = await AuthService.setTechnicianActive(tech.id, nextActive);
+    if (!ok) return;
+    setActionNotice(`Estado de ${tech.fullName} actualizado a ${nextActive ? 'Activo' : 'Inactivo'}`);
     loadTechnicians();
     setTimeout(() => setActionNotice(null), 4000);
+  };
+
+  const handleSaveAssignments = async (tech: UserProfile) => {
+    const assigned = assignmentDrafts[tech.id] || tech.assignedMunicipalities || [];
+    if (!assigned.length) { setActionNotice('Elegí al menos un municipio.'); return; }
+    if (await AuthService.setTechnicianAssignments(tech.id, assigned)) {
+      setActionNotice(`Asignaciones actualizadas para ${tech.fullName}.`);
+      setAssignmentDrafts((previous) => { const next = { ...previous }; delete next[tech.id]; return next; });
+      await loadTechnicians();
+    }
   };
 
   const filteredTechnicians = technicians.filter((t) => {
@@ -255,6 +274,7 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
           filteredTechnicians.map((t) => {
             const status = t.approvalStatus || (t.active ? 'approved' : 'pending');
             const surveyCount = producerCounts[t.id] || 0;
+            const selectedAssignments = assignmentDrafts[t.id] || t.assignedMunicipalities || t.requestedMunicipalities || [];
 
             return (
               <div
@@ -309,7 +329,7 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
 
                     <span className="flex items-center gap-1 text-slate-600">
                       <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      {t.departmentOrZone || t.assignedMunicipalities?.join(', ') || 'Zona Central'}
+                      {t.assignedMunicipalities?.map((id) => MISIONES_MUNICIPALITIES.find((municipality) => municipality.id === id)?.name || id).join(', ') || t.departmentOrZone || 'Sin municipios asignados'}
                     </span>
                   </div>
                 </div>
@@ -323,6 +343,11 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
 
                   {status === 'pending' ? (
                     <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-semibold text-slate-600">Municipios autorizados
+                        <select multiple value={selectedAssignments} onChange={(event) => setAssignmentDrafts((previous) => ({ ...previous, [t.id]: Array.from(event.target.selectedOptions, (option) => option.value) }))} className="mt-1 block w-40 min-h-20 rounded-lg border border-slate-200 p-1 text-[10px]">
+                          {MISIONES_MUNICIPALITIES.map((municipality) => <option key={municipality.id} value={municipality.id}>{municipality.name}</option>)}
+                        </select>
+                      </label>
                       <button
                         onClick={() => handleApprove(t)}
                         className="px-3.5 py-2 bg-[#174C35] hover:bg-[#27865A] text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
@@ -340,6 +365,13 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
                       </button>
                     </div>
                   ) : (
+                    <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-semibold text-slate-600">Municipios asignados
+                      <select multiple value={selectedAssignments} onChange={(event) => setAssignmentDrafts((previous) => ({ ...previous, [t.id]: Array.from(event.target.selectedOptions, (option) => option.value) }))} className="mt-1 block w-40 min-h-20 rounded-lg border border-slate-200 p-1 text-[10px]">
+                        {MISIONES_MUNICIPALITIES.map((municipality) => <option key={municipality.id} value={municipality.id}>{municipality.name}</option>)}
+                      </select>
+                    </label>
+                    <button onClick={() => handleSaveAssignments(t)} className="px-3 py-2 rounded-xl bg-blue-100 text-blue-800 text-xs font-bold">Guardar asignaciones</button>
                     <button
                       onClick={() => handleToggleActive(t)}
                       className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
@@ -350,6 +382,7 @@ export const TechniciansManager: React.FC<TechniciansManagerProps> = ({ currentA
                     >
                       {t.active ? 'Desactivar' : 'Activar Cuenta'}
                     </button>
+                    </div>
                   )}
                 </div>
               </div>

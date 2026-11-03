@@ -62,3 +62,32 @@ export async function compressChacraLogo(file: File, maxDimension: number = 320)
     reader.readAsDataURL(file);
   });
 }
+
+export async function compressCapturedImage(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('El archivo seleccionado no es una imagen.');
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('No se pudo abrir la imagen.')); });
+    const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('No se pudo comprimir la imagen en este dispositivo.');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    let blob: Blob | null = null;
+    for (let quality = 0.86; quality >= 0.4; quality -= 0.1) {
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (blob && blob.size <= 1024 * 1024) break;
+    }
+    if (!blob || blob.size > 1024 * 1024) throw new Error('La imagen supera 1 MiB aun después de comprimirla.');
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('No se pudo guardar la imagen comprimida.'));
+      reader.readAsDataURL(blob!);
+    });
+  } finally { URL.revokeObjectURL(objectUrl); }
+}

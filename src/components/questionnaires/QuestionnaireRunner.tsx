@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { ProtectedImage } from '../common/ProtectedImage';
 import { DynamicQuestionnaire, Producer, QuestionnaireResponse } from '../../db/schema';
 import { db } from '../../db/dexieDb';
 import { syncEngine } from '../../services/syncEngine';
 import { auth } from '../../services/firestoreSync';
+import { compressCapturedImage } from '../../utils/imageCompressor';
 import { 
   FileText, 
   CheckCircle, 
@@ -51,15 +53,11 @@ export const QuestionnaireRunner: React.FC<QuestionnaireRunnerProps> = ({
     }));
   };
 
-  const handlePhotoCapture = (questionId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoCapture = async (questionId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
-    const reader = new FileReader();
-    reader.onload = () => {
-      handleAnswerChange(questionId, reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    void compressCapturedImage(file).then((compressed) => handleAnswerChange(questionId, compressed)).catch((error) => alert(error.message || 'No se pudo comprimir la foto.'));
   };
 
   const handleSubmit = async (isDraft: boolean = false) => {
@@ -87,6 +85,7 @@ export const QuestionnaireRunner: React.FC<QuestionnaireRunnerProps> = ({
         questionnaireVersion: questionnaire.version,
         questionnaireTitle: questionnaire.title,
         producerId: selectedProducer.id,
+        municipalityId: selectedProducer.municipalityId || '',
         producerDni: selectedProducer.dni,
         producerName: selectedProducer.fullName,
         technicianId,
@@ -273,7 +272,7 @@ export const QuestionnaireRunner: React.FC<QuestionnaireRunnerProps> = ({
                   <div className="space-y-2">
                     {currentVal ? (
                       <div className="relative w-32 h-32 rounded-2xl overflow-hidden border border-slate-200">
-                        <img src={currentVal} alt="Foto cargada" className="w-full h-full object-cover" />
+                        <ProtectedImage src={currentVal} alt="Foto cargada" className="w-full h-full object-cover" />
                         <button
                           type="button"
                           onClick={() => handleAnswerChange(q.id, null)}

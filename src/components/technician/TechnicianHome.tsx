@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ProtectedImage } from '../common/ProtectedImage';
 import { Producer, DynamicQuestionnaire, UserProfile } from '../../db/schema';
 import { db } from '../../db/dexieDb';
 import { useSyncEngine } from '../../hooks/useSyncEngine';
@@ -370,7 +371,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                       >
                         <div className="flex items-center gap-3">
                           {prod.logoUrl ? (
-                            <img
+                            <ProtectedImage
                               src={prod.logoUrl}
                               alt={prod.establishmentName}
                               className="w-11 h-11 rounded-xl object-cover border border-slate-200 shrink-0 shadow-2xs"
@@ -525,7 +526,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
               <div className="p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   {selectedProducerModal.logoUrl ? (
-                    <img
+                    <ProtectedImage
                       src={selectedProducerModal.logoUrl}
                       alt="Logo de la Chacra"
                       className="w-14 h-14 rounded-xl object-cover border border-emerald-300 shadow-xs shrink-0 bg-white"
@@ -618,7 +619,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                   <span className="text-slate-400 block text-[10px]">Coordenadas Registradas</span>
                   <span className="font-mono text-slate-800">
                     {selectedProducerModal.isGeolocated !== false ? (
-                      `${selectedProducerModal.lat.toFixed(5)}, ${selectedProducerModal.lng.toFixed(5)} (±${selectedProducerModal.gpsAccuracyMeters || 5}m)`
+                      Number.isFinite(selectedProducerModal.lat) && Number.isFinite(selectedProducerModal.lng) ? `${selectedProducerModal.lat!.toFixed(5)}, ${selectedProducerModal.lng!.toFixed(5)}${selectedProducerModal.gpsAccuracyMeters != null ? ` (±${selectedProducerModal.gpsAccuracyMeters}m)` : ''}` : 'Sin coordenadas registradas'
                     ) : (
                       <span className="text-amber-700 font-sans font-medium">Sin coordenadas precisas asignadas</span>
                     )}
@@ -676,7 +677,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                   </h4>
                   <div className="flex gap-2 overflow-x-auto pb-2">
                     {selectedProducerModal.photoUrls.map((p, i) => (
-                      <img
+                      <ProtectedImage
                         key={i}
                         src={p}
                         alt="Relevamiento"

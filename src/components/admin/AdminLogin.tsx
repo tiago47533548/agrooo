@@ -32,8 +32,8 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Form states
-  const [adminUserInput, setAdminUserInput] = useState('tiagorodriguez091@gmail.com');
-  const [adminPasswordInput, setAdminPasswordInput] = useState('Admin2026!');
+  const [adminUserInput, setAdminUserInput] = useState('');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const handleCredentialsLogin = async (e?: React.FormEvent) => {
@@ -50,26 +50,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
       }
     } catch (err: any) {
       setErrorMessage(err?.message || 'Error al validar credenciales');
-    } finally {
-      setIsSubmittingCredentials(false);
-    }
-  };
-
-  const handleOneClickAdminLogin = async () => {
-    setAdminUserInput('tiagorodriguez091@gmail.com');
-    setAdminPasswordInput('Admin2026!');
-    setIsSubmittingCredentials(true);
-    setErrorMessage(null);
-
-    try {
-      const res = await AuthService.loginWithCredentials('tiagorodriguez091@gmail.com', 'Admin2026!');
-      if (res.success && res.user) {
-        onLoginSuccess(res.user);
-      } else {
-        setErrorMessage(res.error || 'Error al iniciar sesión administrativa');
-      }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Error al conectar perfil administrativo');
     } finally {
       setIsSubmittingCredentials(false);
     }
@@ -143,31 +123,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               </div>
             )}
 
-            {/* Admin Fast Test Access Badge */}
-            <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3.5 space-y-2">
-              <div className="flex items-center justify-between text-xs font-bold text-amber-900">
-                <span className="flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Acceso de Prueba Administrador</span>
-                </span>
-                <span className="text-[10px] bg-amber-200/70 text-amber-950 px-2 py-0.5 rounded-full">
-                  Tiago Rodríguez
-                </span>
-              </div>
-              <p className="text-[11px] text-amber-800">
-                Usuario: <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-200">tiagorodriguez091@gmail.com</code> | Clave: <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-200">Admin2026!</code>
-              </p>
-              <button
-                type="button"
-                onClick={handleOneClickAdminLogin}
-                disabled={isSubmittingCredentials}
-                className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {isSubmittingCredentials ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
-                <span>Ingresar como Administrador (1 clic)</span>
-              </button>
-            </div>
-
             {/* Tab switch between Credentials & Google */}
             <div className="flex p-1 bg-slate-100 rounded-xl">
               <button
@@ -220,6 +175,8 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                     />
                   </div>
                 </div>
+
+                <button type="button" onClick={() => AuthService.resetPassword(adminUserInput).then(() => setErrorMessage('Si la cuenta existe, recibirás un correo para restablecer la contraseña.')).catch((error) => setErrorMessage(error.message))} className="text-[11px] font-semibold text-slate-600 underline">Olvidé mi contraseña</button>
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">

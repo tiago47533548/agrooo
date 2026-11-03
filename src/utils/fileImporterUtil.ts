@@ -12,6 +12,7 @@ import { db } from '../db/dexieDb';
 import { MISIONES_MUNICIPALITIES, PRODUCTIVE_ACTIVITIES_CATALOG } from '../db/misionesCatalog';
 import { isCoordinateInMisionesRange } from './locationParser';
 import { uploadProducerToCloud } from '../services/firestoreSync';
+import { municipalityId } from './municipality';
 
 // Aliases para detección automática de columnas
 const FIELD_ALIASES = {
@@ -39,8 +40,8 @@ function matchHeader(headers: string[], aliases: string[]): string | undefined {
 
 export async function parseAndImportProducerFile(
   file: File,
-  currentUserName: string = 'Administrador Ministerial',
-  currentUserId: string = 'user-admin'
+  currentUserName: string,
+  currentUserId: string
 ): Promise<{
   success: boolean;
   importedCount: number;
@@ -111,6 +112,7 @@ export async function parseAndImportProducerFile(
         const prodId = row.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const producer: Producer = {
           id: prodId,
+          ...row,
           dni: String(row.dni),
           fullName: String(row.fullName),
           phone: String(row.phone || ''),
@@ -119,13 +121,14 @@ export async function parseAndImportProducerFile(
           producerType: row.producerType || 'pequeno_familiar',
           establishmentName: String(row.establishmentName),
           municipality: String(row.municipality),
-          colonyParaje: String(row.colonyParaje || 'Zona rural'),
+          colonyParaje: String(row.colonyParaje || ''),
           addressReference: String(row.addressReference || ''),
-          lat: Number(row.lat) || -27.4862,
-          lng: Number(row.lng) || -55.1205,
-          isGeolocated: row.isGeolocated ?? true,
-          tenureType: row.tenureType || 'propiedad_con_titulo',
-          surfaceHa: Number(row.surfaceHa) || 10,
+          lat: Number.isFinite(Number(row.lat)) && Number(row.lat) !== 0 ? Number(row.lat) : null,
+          lng: Number.isFinite(Number(row.lng)) && Number(row.lng) !== 0 ? Number(row.lng) : null,
+          municipalityId: municipalityId(String(row.municipality)),
+          isGeolocated: Boolean(Number.isFinite(Number(row.lat)) && Number(row.lat) !== 0 && Number.isFinite(Number(row.lng)) && Number(row.lng) !== 0),
+          tenureType: row.tenureType || null,
+          surfaceHa: row.surfaceHa == null || row.surfaceHa === '' || !Number.isFinite(Number(row.surfaceHa)) || Number(row.surfaceHa) < 0 ? null : Number(row.surfaceHa),
           activities: Array.isArray(row.activities) ? row.activities : [],
           observations: String(row.observations || ''),
           version: Number(row.version) || 1,
@@ -133,7 +136,6 @@ export async function parseAndImportProducerFile(
           createdById: row.createdById || currentUserId,
           createdByName: row.createdByName || currentUserName,
           verifiedBySupervisor: Boolean(row.verifiedBySupervisor),
-          ...row,
           syncStatus: 'pending',
           updatedAt: now
         };
@@ -155,11 +157,11 @@ export async function parseAndImportProducerFile(
       const phone = String(mapPhone ? row[mapPhone] : row.phone || '').trim();
       const email = String(mapEmail ? row[mapEmail] : row.email || '').trim();
       const establishmentName = String(mapEst ? row[mapEst] : row.establishmentName || `Chacra de ${fullName}`).trim();
-      const rawMun = String(mapMun ? row[mapMun] : row.municipality || 'Oberá').trim();
-      const colonyParaje = String(mapCol ? row[mapCol] : row.colonyParaje || 'Zona rural').trim();
-      const rawSurface = parseFloat(String(mapSurface ? row[mapSurface] : row.surfaceHa || '10').replace(',', '.').replace(/[^0-9.]/g, ''));
-      const surfaceHa = isNaN(rawSurface) || rawSurface <= 0 ? 12 : rawSurface;
-      const rawAct = String(mapAct ? row[mapAct] : row.activityType || 'Yerba Mate').trim();
+      const rawMun = String(mapMun ? row[mapMun] : row.municipality || '').trim();
+      const colonyParaje = String(mapCol ? row[mapCol] : row.colonyParaje || '').trim();
+      const rawSurface = parseFloat(String(mapSurface ? row[mapSurface] : row.surfaceHa ?? '').replace(',', '.').replace(/[^0-9.]/g, ''));
+      const surfaceHa = isNaN(rawSurface) || rawSurface < 0 ? null : rawSurface;
+      const rawAct = String(mapAct ? row[mapAct] : row.activityType || '').trim();
       const observations = String(mapNotes ? row[mapNotes] : row.observations || '').trim();
       const logoUrl = String(mapLogo ? row[mapLogo] : row.logoUrl || '').trim();
 
@@ -176,12 +178,7 @@ export async function parseAndImportProducerFile(
       let lng = parseFloat(String(mapLng ? row[mapLng] : row.lng || '').replace(',', '.'));
       let isGeolocated = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0 && isCoordinateInMisionesRange(lat, lng);
 
-      if (!isGeolocated) {
-        // Asignar coordenadas del municipio o punto de referencia en Misiones
-        lat = matchedMun?.lat || -27.4862;
-        lng = matchedMun?.lng || -55.1205;
-        isGeolocated = true;
-      }
+      if (!isGeolocated) { lat = NaN; lng = NaN; }
 
       // Normalizar actividad
       const catalogMatch = PRODUCTIVE_ACTIVITIES_CATALOG.find((c) =>
@@ -214,17 +211,16 @@ export async function parseAndImportProducerFile(
         producerType: 'pequeno_familiar',
         establishmentName,
         municipality,
+        municipalityId: municipalityId(municipality),
         colonyParaje,
-        addressReference: observations,
-        lat,
-        lng,
-        isGeolocated: true,
-        locationMethod: 'manual_coords',
-        locationCapturedAt: now,
-        locationCapturedBy: currentUserName,
-        tenureType: 'propiedad_con_titulo',
+        addressReference: String(row.addressReference || ''),
+        lat: Number.isFinite(lat) ? lat : null,
+        lng: Number.isFinite(lng) ? lng : null,
+        isGeolocated,
+        locationMethod: isGeolocated ? 'manual_coords' : 'not_georeferenced',
+        tenureType: null,
         surfaceHa,
-        activities: [activity],
+        activities: rawAct ? [activity] : [],
         logoUrl: logoUrl || undefined,
         observations: `Cargado desde archivo "${file.name}". ${observations}`.trim(),
         syncStatus: 'synced',

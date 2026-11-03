@@ -1,28 +1,81 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Colección de Productores y Establecimientos Productivos de SIP Misiones
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function approved() { return signedIn() && request.auth.token.email_verified == true && profile().active == true && profile().approvalStatus == 'approved'; }
+    function roleIn(roles) { return approved() && profile().role in roles; }
+    function admin() { return roleIn(['SUPERADMIN', 'ADMINISTRADOR']); }
+    function director() { return roleIn(['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR']); }
+    function canAccessMunicipality(municipalityId) {
+      return director() || (approved() && profile().assignedMunicipalities is list && municipalityId in profile().assignedMunicipalities);
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || admin());
+      allow list: if admin();
+      allow create, update, delete: if false;
+    }
+
     match /producers/{producerId} {
-      allow read, write: if true;
-    }
-
-    // Colección de Usuarios y Técnicos
-    match /users/{userId} {
-      allow read, write: if true;
-    }
-
-    // Registros de Auditoría
-    match /auditLogs/{logId} {
-      allow read, write: if true;
+      allow get, list: if canAccessMunicipality(resource.data.municipalityId);
+      allow create: if approved() && roleIn(['SUPERADMIN', 'ADMINISTRADOR', 'TECNICO'])
+        && (admin() || (request.resource.data.createdById == request.auth.uid && canAccessMunicipality(request.resource.data.municipalityId)));
+      allow update: if approved() && (admin() || (roleIn(['TECNICO'])
+        && request.resource.data.createdById == resource.data.createdById
+        && request.resource.data.municipalityId == resource.data.municipalityId
+        && canAccessMunicipality(resource.data.municipalityId)
+        && request.resource.data.verifiedBySupervisor == resource.data.verifiedBySupervisor));
+      allow delete: if admin();
     }
 
     match /questionnaireResponses/{responseId} {
-      allow read, write: if true;
+      allow get, list: if approved() && (director() || resource.data.technicianAuthUid == request.auth.uid
+        && canAccessMunicipality(resource.data.municipalityId)
+        || (roleIn(['SUPERVISOR']) && canAccessMunicipality(resource.data.municipalityId)));
+      allow create: if approved() && roleIn(['TECNICO'])
+        && request.resource.data.technicianAuthUid == request.auth.uid
+        && request.resource.data.municipalityId is string
+        && canAccessMunicipality(request.resource.data.municipalityId);
+      allow update: if approved() && (admin() || (roleIn(['TECNICO'])
+        && resource.data.technicianAuthUid == request.auth.uid
+        && request.resource.data.technicianAuthUid == request.auth.uid
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.municipalityId == resource.data.municipalityId
+        && request.resource.data.producerId == resource.data.producerId
+        && request.resource.data.questionnaireId == resource.data.questionnaireId
+        && request.resource.data.questionnaireVersion == resource.data.questionnaireVersion
+        && canAccessMunicipality(resource.data.municipalityId))
+        || (roleIn(['SUPERVISOR']) && canAccessMunicipality(resource.data.municipalityId)
+          && request.resource.data.technicianAuthUid == resource.data.technicianAuthUid
+          && request.resource.data.municipalityId == resource.data.municipalityId
+          && request.resource.data.answers == resource.data.answers
+          && request.resource.data.producerId == resource.data.producerId
+          && request.resource.data.questionnaireId == resource.data.questionnaireId
+          && request.resource.data.status in ['validated', 'observed']));
+      allow delete: if admin();
     }
 
-    // Resto de colecciones denegadas por defecto
-    match /{document=**} {
-      allow read, write: if false;
+    match /questionnaires/{questionnaireId} {
+      allow read: if approved();
+      allow write: if admin();
     }
+
+    match /questionnaireVersions/{versionId} {
+      allow read: if approved();
+      allow create, update, delete: if false;
+    }
+
+    match /invitations/{invitationId} {
+      allow read: if admin();
+      allow write: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if director();
+      allow write: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }

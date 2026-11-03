@@ -1,6 +1,7 @@
 import { db } from '../db/dexieDb';
 import { Producer, QuestionnaireResponse, SyncQueueItem } from '../db/schema';
 import { uploadQueueItem } from './firestoreSync';
+import { firebaseAuth } from './firebaseClient';
 
 export type SyncStatusState = 'ONLINE' | 'OFFLINE' | 'PENDIENTE' | 'SINCRONIZANDO' | 'SINCRONIZADO' | 'ERROR';
 export interface SyncEngineStatus {
@@ -43,9 +44,10 @@ class SyncEngine {
     const queues = db.syncQueue;
     const now = new Date().toISOString();
     const baseRevision = (record as any).cloudRevision || 0;
+    const operationId = crypto.randomUUID();
     const queueItem: SyncQueueItem = {
-      id: `queue_${table}_${record.id}_${Date.now()}`, table: table === 'questionnaireResponses' ? 'questionnaire_responses' : 'producers',
-      action, recordId: record.id, payload: record, idempotencyKey: `idemp_${table}_${record.id}_${(record as any).updatedAt || now}`,
+      id: crypto.randomUUID(), table: table === 'questionnaireResponses' ? 'questionnaire_responses' : 'producers',
+      action, recordId: record.id, payload: record, idempotencyKey: operationId,
       attempts: 0, status: 'pending', createdAt: now, baseRevision, payloadRevision: (record as any).updatedAt || now
     };
     await db.transaction('rw', dexieTable, queues, async () => { await dexieTable.put(record as any); await queues.add(queueItem); });
@@ -67,6 +69,7 @@ class SyncEngine {
   }
 
   async triggerSync(): Promise<{ success: boolean; syncedCount: number; errors: string[] }> {
+    if (!firebaseAuth.currentUser) return { success: false, syncedCount: 0, errors: ['Iniciá sesión para sincronizar los datos de esta cuenta.'] };
     if (this.cycle) return this.cycle;
     if (!this.isOnline) return { success: false, syncedCount: 0, errors: ['Sin conexión; los datos siguen guardados en este dispositivo.'] };
     this.cycle = this.runCycle();
@@ -91,7 +94,11 @@ class SyncEngine {
           if (nextTime) this.scheduleRetry(nextTime - now);
           break;
         }
+        const sentRecords = new Set<string>();
         for (const item of batch) {
+          const recordKey = `${item.table}:${item.recordId}`;
+          if (sentRecords.has(recordKey)) continue;
+          sentRecords.add(recordKey);
           await db.syncQueue.update(item.id, { status: 'syncing', lastAttempt: new Date().toISOString() });
           const result = await uploadQueueItem(item);
           if (result.ok) {
@@ -114,6 +121,9 @@ class SyncEngine {
           } else if (result.kind === 'conflict') {
             if (item.table === 'producers') await db.producers.update(item.recordId, { syncStatus: 'conflict', syncError: result.message, syncConflict: { cloudRecord: result.cloudRecord as Producer, detectedAt: new Date().toISOString() } });
             await db.syncQueue.update(item.id, { status: 'failed', error: result.message, errorKind: 'conflict' });
+            await db.syncQueue.where('recordId').equals(item.recordId).modify((queued) => {
+              if (queued.table === item.table && queued.status === 'pending') { queued.status = 'failed'; queued.error = 'Se detuvo la cola de este registro por un conflicto anterior.'; queued.errorKind = 'conflict'; }
+            });
             errors.push(result.message);
           } else {
             const attempts = item.attempts + 1;

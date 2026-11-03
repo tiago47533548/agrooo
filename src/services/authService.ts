@@ -1,57 +1,11 @@
-/**
- * SIP MISIONES - Authentication & RBAC Service
- * Ministerio del Agro y la Producción de Misiones
- * 
- * Reglas de autorización e identidades de acceso con Google Sign-In.
- */
-
-import { UserProfile, UserRole } from '../db/schema';
-import { db } from '../db/dexieDb';
-import { INITIAL_USERS } from '../db/seedData';
-
-// Cuentas administradoras autorizadas de forma estricta
-export const AUTHORIZED_ADMIN_EMAILS: string[] = [
-  'tiagorodirguez091@gmail.com',
-  'tiagorodriguez091@gmail.com',
-  'magnoleonrossi@gmail.com',
-  'admin@agro.misiones.gob.ar',
-  'marina.santos@agro.misiones.gob.ar'
-];
-
-// Cuenta técnica inicial autorizada para relevamiento de campo
-export const INITIAL_APPROVED_TECHNICIAN_EMAILS: string[] = [
-  'acelerados.misiones@gmail.com',
-  'juan.benitez@campo.misiones.gob.ar',
-  'tecnico.prueba@agro.misiones.gob.ar',
-  'tecnico@agro.misiones.gob.ar',
-  'tecnico@misiones.gob.ar'
-];
-
-/**
- * Perfil y credenciales oficiales de prueba para técnicos de campo
- */
-export const DEMO_TECHNICIAN_CREDENTIALS = {
-  username: 'tecnico.prueba@agro.misiones.gob.ar',
-  alias: 'tecnico',
-  password: 'Tecnico2026!',
-  acceptedPasswords: ['Tecnico2026!', 'tecnico2026', 'tecnico123', 'MisionesAgro2026!', '123456'],
-  profile: {
-    id: 'user-tecnico-prueba',
-    email: 'tecnico.prueba@agro.misiones.gob.ar',
-    fullName: 'Técnico Zonal Acelerados Misiones',
-    role: 'TECNICO' as const,
-    dni: '35194820',
-    phone: '+54 3755 49-3320',
-    departmentOrZone: 'Oberá, Campo Viera y Leandro N. Alem',
-    assignedMunicipalities: ['obera', 'campo_viera', 'leandro_n_alem', 'san_vicente', 'posadas'],
-    active: true,
-    approvalStatus: 'approved' as const,
-    authProvider: 'password' as const,
-    emailVerified: true
-  }
-};
-
-const SESSION_STORAGE_KEY = 'sip_misiones_auth_user';
+import {
+  createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail,
+  signInWithEmailAndPassword, signOut, updateProfile, User
+} from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { UserProfile } from '../db/schema';
+import { firebaseAuth, firebaseDb, firebaseFunctions } from './firebaseClient';
 
 export interface GoogleAuthResult {
   success: boolean;
@@ -62,416 +16,141 @@ export interface GoogleAuthResult {
   name?: string;
 }
 
+function toProfile(uid: string, data: Record<string, any>): UserProfile {
+  return { ...data, id: uid, uid, email: String(data.email || ''), fullName: String(data.fullName || ''), role: data.role, dni: String(data.dni || ''), active: data.active === true } as unknown as UserProfile;
+}
+
 export class AuthService {
-  /**
-   * Obtiene la sesión autenticada actual almacenada localmente
-   */
-  static getStoredSession(): UserProfile | null {
+  static async signOut(): Promise<void> {
+    await signOut(firebaseAuth);
+  }
+
+  static clearSession(): void { /* Firebase Auth owns session state. */ }
+
+  static async getAuthenticatedProfile(user: User = firebaseAuth.currentUser!): Promise<UserProfile | null> {
+    if (!user) return null;
+    const cacheKey = `sip-account-${user.uid}`;
     try {
-      const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw) as UserProfile;
-    } catch {
+      await user.reload();
+      if (!user.emailVerified) return null;
+      const snap = await getDoc(doc(firebaseDb, 'users', user.uid));
+      if (!snap.exists()) return null;
+      const profile = toProfile(user.uid, snap.data());
+      localStorage.setItem(cacheKey, JSON.stringify({ profile, checkedAt: Date.now() }));
+      return profile;
+    } catch (error: any) {
+      const networkFailure = ['auth/network-request-failed', 'unavailable', 'deadline-exceeded', 'network-request-failed'].includes(String(error?.code || ''));
+      if (navigator.onLine && !networkFailure) throw error;
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+        if (cached?.profile && Date.now() - Number(cached.checkedAt) <= 7 * 86400000) return cached.profile as UserProfile;
+      } catch { /* Ignore corrupt or expired offline profile cache. */ }
       return null;
     }
   }
 
-  /**
-   * Guarda la sesión autenticada
-   */
-  static setStoredSession(user: UserProfile): void {
+
+  static async loginWithCredentials(emailInput: string, passwordInput: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
     try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
-    } catch (e) {
-      console.error('Error guardando sesión de usuario', e);
+      const credential = await signInWithEmailAndPassword(firebaseAuth, emailInput.trim().toLowerCase(), passwordInput);
+      const profile = await this.getAuthenticatedProfile(credential.user);
+      if (!profile?.active || profile.approvalStatus !== 'approved') {
+        await signOut(firebaseAuth);
+        return { success: false, error: profile?.approvalStatus === 'rejected' ? 'La solicitud fue rechazada.' : 'La cuenta todavía no está aprobada.' };
+      }
+      return { success: true, user: profile };
+    } catch (error: any) {
+      await signOut(firebaseAuth).catch(() => undefined);
+      return { success: false, error: error?.code === 'auth/invalid-credential' ? 'Correo o contraseña incorrectos.' : error?.message || 'No se pudo iniciar sesión.' };
     }
   }
 
-  /**
-   * Cierra la sesión activa
-   */
-  static clearSession(): void {
+  static async createPasswordAccount(email: string, password: string, fullName: string): Promise<void> {
+    const credential = await createUserWithEmailAndPassword(firebaseAuth, email.trim().toLowerCase(), password);
+    await updateProfile(credential.user, { displayName: fullName.trim() });
+    await sendEmailVerification(credential.user);
+  }
+
+  static async signInForInvitation(email: string, password: string): Promise<User> {
+    const credential = await signInWithEmailAndPassword(firebaseAuth, email.trim().toLowerCase(), password);
+    return credential.user;
+  }
+
+  static async resendVerificationEmail(): Promise<void> {
+    const user = firebaseAuth.currentUser;
+    if (!user) throw new Error('Iniciá sesión para reenviar el correo de verificación.');
+    await sendEmailVerification(user);
+  }
+
+  static async validateTechnicianInvitation(code: string): Promise<{ code: string; role: UserProfile['role']; expiresAt: string; emailAllowed: string | null }> {
+    const validate = httpsCallable<{ code: string }, { code: string; role: UserProfile['role']; expiresAt: string; emailAllowed: string | null }>(firebaseFunctions, 'validateTechnicianInvitation');
+    return (await validate({ code: code.trim() })).data;
+  }
+
+  static async redeemTechnicianInvitation(data: { code: string; fullName: string; dni: string; phone: string }): Promise<UserProfile> {
+    const user = firebaseAuth.currentUser;
+    if (!user) throw new Error('Creá una cuenta e iniciá sesión antes de canjear la invitación.');
+    await user.reload();
+    if (!user.emailVerified) throw new Error('Verificá tu correo electrónico antes de continuar.');
+    await httpsCallable(firebaseFunctions, 'redeemTechnicianInvitation')(data);
+    const profile = await this.getAuthenticatedProfile(user);
+    if (!profile) throw new Error('La cuenta se creó, pero no se pudo cargar el perfil. Iniciá sesión nuevamente.');
+    return profile;
+  }
+
+  static async resetPassword(email: string): Promise<void> {
+    await sendPasswordResetEmail(firebaseAuth, email.trim().toLowerCase());
+  }
+
+  static async getTechnicianApplicationStatus(): Promise<'approved' | 'pending' | 'rejected' | 'disabled' | 'unregistered'> {
+    const status = httpsCallable<void, { status: 'approved' | 'pending' | 'rejected' | 'disabled' | 'unregistered' }>(firebaseFunctions, 'getTechnicianApplicationStatus');
+    return (await status()).data.status;
+  }
+
+  static async authenticateWithGoogle(_targetRole: 'admin' | 'technician', email: string, fullName: string, uid: string): Promise<GoogleAuthResult> {
     try {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch (e) {
-      console.error('Error limpiando sesión', e);
+      const user = firebaseAuth.currentUser;
+      if (!user || user.uid !== uid || !user.emailVerified) return { success: false, status: 'unauthorized', email, error: 'La cuenta debe tener un correo verificado.' };
+      const snap = await getDoc(doc(firebaseDb, 'users', uid));
+      if (!snap.exists()) return { success: false, status: 'unregistered', email, name: fullName, error: 'La cuenta todavía no está registrada. Solicitá el alta o usá una invitación.' };
+      const profile = toProfile(uid, snap.data());
+      if (!profile.active || profile.approvalStatus !== 'approved') return { success: false, status: profile.approvalStatus === 'rejected' ? 'rejected' : 'pending', user: profile, email, error: 'La cuenta está pendiente de aprobación o deshabilitada.' };
+      if (_targetRole === 'admin' && !['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR', 'SUPERVISOR'].includes(profile.role)) return { success: false, status: 'unauthorized', email, error: 'La cuenta no tiene permisos administrativos.' };
+      return { success: true, user: profile, status: 'approved', email };
+    } catch (error: any) {
+      return { success: false, error: error?.message || 'No se pudo validar el perfil.' };
     }
   }
 
-  /**
-   * Autenticación con credenciales (usuario/correo y contraseña) para pruebas y relevamiento territorial
-   */
-  static async loginWithCredentials(
-    usernameOrEmailInput: string,
-    passwordInput: string
-  ): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-    const identifier = usernameOrEmailInput.trim().toLowerCase();
-    const password = passwordInput.trim();
-
-    if (!identifier || !password) {
-      return {
-        success: false,
-        error: 'Por favor ingresá el usuario o correo y la contraseña.'
-      };
-    }
-
-    // 1. Coincidencia con perfil de prueba oficial de técnico
-    const isDemoIdentifier = 
-      identifier === DEMO_TECHNICIAN_CREDENTIALS.username.toLowerCase() ||
-      identifier === DEMO_TECHNICIAN_CREDENTIALS.alias.toLowerCase() ||
-      identifier === 'tecnico' ||
-      identifier === 'tecnico.prueba' ||
-      identifier === 'acelerados.misiones@gmail.com' ||
-      identifier === 'tecnico@agro.misiones.gob.ar' ||
-      identifier === 'tecnico@misiones.gob.ar' ||
-      identifier === 'juan.benitez@campo.misiones.gob.ar';
-
-    const isDemoPasswordValid = 
-      password === DEMO_TECHNICIAN_CREDENTIALS.password ||
-      DEMO_TECHNICIAN_CREDENTIALS.acceptedPasswords.includes(password);
-
-    if (isDemoIdentifier) {
-      if (!isDemoPasswordValid) {
-        return {
-          success: false,
-          error: 'Contraseña incorrecta. La contraseña del perfil de prueba técnico es: Tecnico2026!'
-        };
-      }
-
-      // Asegurar que exista el perfil en Dexie DB
-      const existing = await db.users.where('email').equalsIgnoreCase(DEMO_TECHNICIAN_CREDENTIALS.profile.email).first();
-      let user: UserProfile;
-      if (!existing) {
-        user = {
-          ...DEMO_TECHNICIAN_CREDENTIALS.profile,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        await db.users.put(user);
-      } else {
-        user = {
-          ...existing,
-          active: true,
-          approvalStatus: 'approved',
-          updatedAt: new Date().toISOString()
-        };
-        await db.users.put(user);
-      }
-
-      this.setStoredSession(user);
-      return { success: true, user };
-    }
-
-    // 2. Verificar si existe algún otro usuario técnico registrado en la base de datos local
-    const existingUser = await db.users.where('email').equalsIgnoreCase(identifier).first();
-    if (existingUser && existingUser.role === 'TECNICO') {
-      if (!existingUser.active || existingUser.approvalStatus !== 'approved') {
-        return {
-          success: false,
-          error: 'Esta cuenta técnica está en revisión o no se encuentra habilitada por el Ministerio.'
-        };
-      }
-
-      if (password === DEMO_TECHNICIAN_CREDENTIALS.password || password === '123456' || password === 'Tecnico2026!') {
-        this.setStoredSession(existingUser);
-        return { success: true, user: existingUser };
-      }
-    }
-
-    // 3. Verificación de credenciales para panel de administración
-    const isAdminIdentifier = 
-      AUTHORIZED_ADMIN_EMAILS.some((e) => e.toLowerCase() === identifier) || 
-      identifier === 'admin';
-
-    if (isAdminIdentifier) {
-      if (password === 'Admin2026!' || password === 'Tecnico2026!' || password === '123456' || password === 'admin123') {
-        const adminEmail = identifier === 'admin' ? 'tiagorodriguez091@gmail.com' : identifier;
-        const existingAdmin = await db.users.where('email').equalsIgnoreCase(adminEmail).first();
-        let adminUser: UserProfile;
-        if (!existingAdmin) {
-          adminUser = {
-            id: `user-admin-${Date.now()}`,
-            email: adminEmail,
-            fullName: adminEmail.includes('tiago') ? 'Tiago Rodríguez' : adminEmail.includes('magno') ? 'Magno León Rossi' : 'Administrador Provincial',
-            role: 'ADMINISTRADOR',
-            dni: '41205948',
-            phone: '+54 376 450-8912',
-            active: true,
-            approvalStatus: 'approved',
-            authProvider: 'password',
-            emailVerified: true,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-          await db.users.put(adminUser);
-        } else {
-          adminUser = existingAdmin;
-        }
-        this.setStoredSession(adminUser);
-        return { success: true, user: adminUser };
-      }
-    }
-
-    return {
-      success: false,
-      error: 'Usuario o correo no reconocido. Podés ingresar con el usuario de prueba técnico: "tecnico.prueba@agro.misiones.gob.ar" y contraseña "Tecnico2026!".'
-    };
-  }
-
-  /**
-   * Autenticación con Google e inspección de roles (RBAC)
-   */
-  static async authenticateWithGoogle(
-    targetRole: 'admin' | 'technician',
-    emailInput: string,
-    fullNameInput?: string
-  ): Promise<GoogleAuthResult> {
-    const email = emailInput.trim().toLowerCase();
-    const fullName = fullNameInput?.trim() || email.split('@')[0];
-
-    // 1. FLUJO ADMINISTRATIVO
-    if (targetRole === 'admin') {
-      const isAuthorized = AUTHORIZED_ADMIN_EMAILS.some(
-        (e) => e.toLowerCase() === email
-      );
-
-      if (!isAuthorized) {
-        return {
-          success: false,
-          status: 'unauthorized',
-          error: `Acceso administrativo denegado: El correo "${email}" no posee permisos de administración en SIP Misiones. Esta sección está reservada exclusivamente a funcionarios autorizados del Ministerio del Agro y la Producción.`
-        };
-      }
-
-      // Buscar si ya existe el usuario en la base de datos local
-      let user = await db.users.where('email').equalsIgnoreCase(email).first();
-
-      if (!user) {
-        // Crear registro en la tabla de usuarios locales
-        user = {
-          id: `user-admin-${Date.now()}`,
-          email,
-          fullName: fullName.includes('@') ? (email.includes('tiago') ? 'Tiago Rodríguez' : email.includes('magno') ? 'Magno León Rossi' : 'Administrador Provincial') : fullName,
-          role: 'ADMINISTRADOR',
-          dni: '35000000',
-          active: true,
-          approvalStatus: 'approved',
-          authProvider: 'google',
-          emailVerified: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        await db.users.put(user);
-      }
-
-      this.setStoredSession(user);
-      return { success: true, user, status: 'approved' };
-    }
-
-    // 2. FLUJO TÉCNICO DE CAMPO
-    if (targetRole === 'technician') {
-      // Verificar si es la cuenta técnica inicial aprobada por defecto
-      const isPreApproved = INITIAL_APPROVED_TECHNICIAN_EMAILS.some(
-        (e) => e.toLowerCase() === email
-      );
-
-      let user = await db.users.where('email').equalsIgnoreCase(email).first();
-
-      if (isPreApproved) {
-        if (!user) {
-          user = {
-            id: 'user-tecnico-acelerados',
-            email,
-            fullName: 'Técnico Zonal Acelerados Misiones',
-            role: 'TECNICO',
-            dni: '35194820',
-            phone: '+54 3755 49-3320',
-            assignedMunicipalities: ['obera', 'campo_viera', 'leandro_n_alem', 'san_vicente', 'posadas'],
-            active: true,
-            approvalStatus: 'approved',
-            authProvider: 'google',
-            emailVerified: true,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-          await db.users.put(user);
-        }
-
-        this.setStoredSession(user);
-        return { success: true, user, status: 'approved' };
-      }
-
-      // Si no es la cuenta inicial de Acelerados, buscar registro en base de datos
-      if (!user) {
-        return {
-          success: false,
-          status: 'unregistered',
-          email,
-          name: fullName,
-          error: 'Esta cuenta de Google no se encuentra registrada como técnico territorial. Por favor completá tu solicitud de alta de técnico.'
-        };
-      }
-
-      // Si existe pero está pendiente
-      if (user.approvalStatus === 'pending' || !user.active) {
-        return {
-          success: false,
-          status: 'pending',
-          user,
-          error: `Tu cuenta como técnico (${email}) está pendiente de aprobación por la Dirección del Ministerio del Agro y la Producción.`
-        };
-      }
-
-      // Si está rechazado
-      if (user.approvalStatus === 'rejected') {
-        return {
-          success: false,
-          status: 'rejected',
-          user,
-          error: `Tu solicitud de técnico para el correo ${email} no ha sido aprobada por el Ministerio del Agro.`
-        };
-      }
-
-      this.setStoredSession(user);
-      return { success: true, user, status: 'approved' };
-    }
-
-    return {
-      success: false,
-      error: 'Rol no especificado'
-    };
-  }
-
-  /**
-   * Registro de nueva solicitud de técnico de campo
-   */
-  static async registerTechnicianRequest(data: {
-    email: string;
-    fullName: string;
-    dni: string;
-    phone: string;
-    departmentOrZone: string;
-  }): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
+  static async registerTechnicianRequest(data: { email: string; fullName: string; dni: string; phone: string; departmentOrZone: string }): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
     try {
-      const email = data.email.trim().toLowerCase();
-
-      // Verificar si ya existe
-      const existing = await db.users.where('email').equalsIgnoreCase(email).first();
-      if (existing) {
-        if (existing.approvalStatus === 'pending') {
-          return {
-            success: false,
-            error: 'Ya existe una solicitud pendiente de aprobación para este correo electrónico.'
-          };
-        }
-        if (existing.active && existing.approvalStatus === 'approved') {
-          return {
-            success: false,
-            error: 'Esta cuenta ya está registrada y aprobada. Ingresá directamente desde la pantalla de técnicos.'
-          };
-        }
-      }
-
-      const newTechnician: UserProfile = {
-        id: `user-tec-req-${Date.now()}`,
-        email,
-        fullName: data.fullName.trim(),
-        dni: data.dni.trim(),
-        phone: data.phone.trim(),
-        departmentOrZone: data.departmentOrZone.trim(),
-        assignedMunicipalities: [data.departmentOrZone.toLowerCase().replace(/\s+/g, '_')],
-        role: 'TECNICO',
-        active: false,
-        approvalStatus: 'pending',
-        authProvider: 'google',
-        emailVerified: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      await db.users.put(newTechnician);
-
-      // Registrar en auditoría
-      await db.auditLogs.add({
-        id: `audit-${Date.now()}`,
-        userId: newTechnician.id,
-        userName: newTechnician.fullName,
-        userRole: 'TECNICO',
-        action: 'SOLICITUD_REGISTRO_TECNICO',
-        entity: 'users',
-        entityId: newTechnician.id,
-        details: `Solicitud de registro de nuevo técnico territorial para zona: ${data.departmentOrZone}`,
-        device: navigator.userAgent,
-        timestamp: new Date().toISOString()
-      });
-
-      return { success: true, user: newTechnician };
-    } catch (e: any) {
-      return { success: false, error: e?.message || 'Error al procesar la solicitud' };
-    }
+      const user = firebaseAuth.currentUser;
+      if (!user || !user.emailVerified || user.email?.toLowerCase() !== data.email.trim().toLowerCase()) return { success: false, error: 'Iniciá sesión con el correo verificado que querés registrar.' };
+      const submit = httpsCallable(firebaseFunctions, 'submitTechnicianApplication');
+      const { municipalityId } = await import('../utils/municipality');
+      const municipality = municipalityId(data.departmentOrZone);
+      if (!municipality) return { success: false, error: 'Seleccioná un municipio válido.' };
+      await submit({ fullName: data.fullName, dni: data.dni, phone: data.phone, municipalityIds: [municipality] });
+      const profile: UserProfile = { id: user.uid, email: user.email, fullName: data.fullName.trim(), dni: data.dni.trim(), phone: data.phone.trim(), departmentOrZone: data.departmentOrZone.trim(), assignedMunicipalities: [], role: 'TECNICO', active: false, approvalStatus: 'pending', authProvider: 'google', emailVerified: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      return { success: true, user: profile };
+    } catch (error: any) { return { success: false, error: error?.message || 'No se pudo registrar la solicitud.' }; }
   }
 
-  /**
-   * Aprobación de técnico por parte de un administrador
-   */
-  static async approveTechnician(userId: string, adminUser: UserProfile): Promise<boolean> {
+  static async approveTechnician(uid: string, _adminUser: UserProfile, assignedMunicipalities: string[] = []): Promise<boolean> { return this.reviewTechnician(uid, 'approved', assignedMunicipalities); }
+  static async rejectTechnician(uid: string, _adminUser: UserProfile): Promise<boolean> { return this.reviewTechnician(uid, 'rejected'); }
+  static async setTechnicianActive(uid: string, active: boolean): Promise<boolean> {
+    try { await httpsCallable(firebaseFunctions, 'setTechnicianActive')({ uid, active }); return true; }
+    catch { return false; }
+  }
+  static async setTechnicianAssignments(uid: string, assignedMunicipalities: string[]): Promise<boolean> {
+    try { await httpsCallable(firebaseFunctions, 'setTechnicianAssignments')({ uid, assignedMunicipalities }); return true; }
+    catch { return false; }
+  }
+  private static async reviewTechnician(uid: string, status: 'approved' | 'rejected', assignedMunicipalities: string[] = []): Promise<boolean> {
     try {
-      const user = await db.users.get(userId);
-      if (!user) return false;
-
-      user.active = true;
-      user.approvalStatus = 'approved';
-      user.updatedAt = new Date().toISOString();
-      await db.users.put(user);
-
-      await db.auditLogs.add({
-        id: `audit-${Date.now()}`,
-        userId: adminUser.id,
-        userName: adminUser.fullName,
-        userRole: adminUser.role,
-        action: 'APROBAR_TECNICO',
-        entity: 'users',
-        entityId: user.id,
-        details: `Aprobación de cuenta técnica para ${user.fullName} (${user.email})`,
-        device: 'Admin Console',
-        timestamp: new Date().toISOString()
-      });
-
+      const review = httpsCallable(firebaseFunctions, 'reviewTechnicianApplication');
+      await review({ uid, status, assignedMunicipalities });
       return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Rechazo de solicitud de técnico
-   */
-  static async rejectTechnician(userId: string, adminUser: UserProfile): Promise<boolean> {
-    try {
-      const user = await db.users.get(userId);
-      if (!user) return false;
-
-      user.active = false;
-      user.approvalStatus = 'rejected';
-      user.updatedAt = new Date().toISOString();
-      await db.users.put(user);
-
-      await db.auditLogs.add({
-        id: `audit-${Date.now()}`,
-        userId: adminUser.id,
-        userName: adminUser.fullName,
-        userRole: adminUser.role,
-        action: 'RECHAZAR_TECNICO',
-        entity: 'users',
-        entityId: user.id,
-        details: `Rechazo de solicitud de técnico para ${user.fullName} (${user.email})`,
-        device: 'Admin Console',
-        timestamp: new Date().toISOString()
-      });
-
-      return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 }

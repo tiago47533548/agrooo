@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, UserRole, Producer, DynamicQuestionnaire } from './db/schema';
 import { db } from './db/dexieDb';
-import { seedInitialDatabaseIfEmpty, INITIAL_USERS } from './db/seedData';
+import { switchDatabaseForUser } from './db/dexieDb';
 import { useSyncEngine } from './hooks/useSyncEngine';
 import { SipLogo } from './components/brand/SipLogo';
 import { SyncStatusBanner } from './components/common/SyncStatusBanner';
@@ -20,9 +20,12 @@ import { InvitationsManager } from './components/admin/InvitationsManager';
 import { DatabaseConfigView } from './components/admin/DatabaseConfigView';
 import { DatabaseImporter } from './components/admin/DatabaseImporter';
 import { TechniciansManager } from './components/admin/TechniciansManager';
+import { QuestionnaireResponsesReview } from './components/admin/QuestionnaireResponsesReview';
 import { RegisterWithInvitation } from './components/auth/RegisterWithInvitation';
 import { AuthService } from './services/authService';
 import { syncEngine } from './services/syncEngine';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from './services/googleAuth';
 import { 
   LayoutDashboard, 
   Users, 
@@ -63,7 +66,7 @@ export default function App() {
   const [prefillRegisterEmail, setPrefillRegisterEmail] = useState<string>('');
   
   // Admin Navigation State
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'producers' | 'map' | 'technicians' | 'questionnaires' | 'invitations' | 'importer' | 'database'>('dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'producers' | 'map' | 'technicians' | 'questionnaires' | 'responses' | 'invitations' | 'importer' | 'database'>('dashboard');
   
   // Data State
   const [producers, setProducers] = useState<Producer[]>([]);
@@ -82,56 +85,61 @@ export default function App() {
   const [isReloadingDb, setIsReloadingDb] = useState(false);
   const [dbSuccessMessage, setDbSuccessMessage] = useState<string | null>(null);
 
-  // Initialize DB, Seed Data, and Session/Routes with Firestore Real-time Cloud Sync
+  // Restore identity from Firebase Auth; local profiles never grant access.
   useEffect(() => {
     let unsubscribeCloud: (() => void) | null = null;
-
-    const init = async () => {
-      await seedInitialDatabaseIfEmpty();
-      await refreshData();
-
-      // Check stored session
-      const stored = AuthService.getStoredSession();
-      if (stored) {
-        setCurrentUser(stored);
+    let onlineHandler: (() => void) | null = null;
+    let cancelled = false;
+    void refreshData();
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      unsubscribeCloud?.();
+      unsubscribeCloud = null;
+      if (onlineHandler) window.removeEventListener('online', onlineHandler);
+      onlineHandler = null;
+      if (!firebaseUser) {
+        await switchDatabaseForUser();
+        setCurrentUser(null);
+        resolveInitialRoute(null);
+        return;
       }
-
-      // Read current URL path
-      resolveInitialRoute(stored);
-
-      // Sincronización bidireccional y suscripción en tiempo real con Firebase Firestore
       try {
+        await switchDatabaseForUser(firebaseUser.uid);
+        const profile = await AuthService.getAuthenticatedProfile(firebaseUser);
+        if (cancelled) return;
+        if (!profile || !profile.active || profile.approvalStatus !== 'approved') {
+          setCurrentUser(null);
+          resolveInitialRoute(null);
+          return;
+        }
+        setCurrentUser(profile);
+        resolveInitialRoute(profile);
         const { syncCloudWithLocal, subscribeToCloudProducers } = await import('./services/firestoreSync');
-        
-        // 1. Sincronización inicial rápida en segundo plano
-        syncCloudWithLocal().then(() => syncEngine.triggerSync()).then(() => {
-          refreshData();
-        }).catch((err) => {
-          console.warn('Aviso sincronización inicial Firestore:', err);
-        });
-
-        // 2. Suscripción en tiempo real: cualquier productor cargado por técnicos
-        // o archivos se refleja inmediatamente en el panel administrativo sin recargar
-        unsubscribeCloud = subscribeToCloudProducers((cloudProducers) => {
-          if (cloudProducers && cloudProducers.length > 0) {
-            refreshData();
-          }
-        });
-      } catch (err) {
-        console.warn('No se pudo inicializar listener en tiempo real de Firestore:', err);
+        await syncCloudWithLocal();
+        if (cancelled) return;
+        await syncEngine.triggerSync();
+        unsubscribeCloud = subscribeToCloudProducers(() => { void refreshData(); });
+        onlineHandler = () => {
+          void syncCloudWithLocal().then(() => syncEngine.triggerSync()).then(() => refreshData()).catch((error) => console.warn('No se pudo revalidar la caché al reconectar:', error));
+        };
+        window.addEventListener('online', onlineHandler);
+        await refreshData();
+      } catch (error) {
+        console.warn('No se pudo restaurar la sesión autenticada:', error);
+        setCurrentUser(null);
+        resolveInitialRoute(null);
       }
-    };
-
-    init();
+    });
 
     // Listen to browser navigation (back/forward)
     const handlePopState = () => {
-      const stored = AuthService.getStoredSession();
-      resolveInitialRoute(stored);
+      resolveInitialRoute(currentUser);
     };
     window.addEventListener('popstate', handlePopState);
     return () => {
       window.removeEventListener('popstate', handlePopState);
+      cancelled = true;
+      unsubscribeAuth();
+      if (onlineHandler) window.removeEventListener('online', onlineHandler);
       if (unsubscribeCloud) {
         unsubscribeCloud();
       }
@@ -182,7 +190,7 @@ export default function App() {
     }
 
     if (path === '/admin/dashboard') {
-      if (activeUser && (activeUser.role === 'ADMINISTRADOR' || activeUser.role === 'SUPERADMIN' || activeUser.role === 'DIRECTOR')) {
+      if (activeUser && (activeUser.role === 'ADMINISTRADOR' || activeUser.role === 'SUPERADMIN' || activeUser.role === 'DIRECTOR' || activeUser.role === 'SUPERVISOR')) {
         setCurrentRoute('admin-dashboard');
       } else {
         setRouteAccessNotice('Acceso restringido: Debes autenticarte con una cuenta administradora autorizada.');
@@ -192,7 +200,7 @@ export default function App() {
     }
 
     if (path === '/admin') {
-      if (activeUser && (activeUser.role === 'ADMINISTRADOR' || activeUser.role === 'SUPERADMIN' || activeUser.role === 'DIRECTOR')) {
+      if (activeUser && (activeUser.role === 'ADMINISTRADOR' || activeUser.role === 'SUPERADMIN' || activeUser.role === 'DIRECTOR' || activeUser.role === 'SUPERVISOR')) {
         setCurrentRoute('admin-dashboard');
         window.history.replaceState({}, '', '/admin/dashboard');
       } else {
@@ -214,11 +222,6 @@ export default function App() {
   const refreshData = async () => {
     try {
       let prods = await db.producers.orderBy('updatedAt').reverse().toArray();
-      // If DB has 0 producers, automatically seed the 14 territorial producers
-      if (prods.length === 0) {
-        await seedInitialDatabaseIfEmpty(true);
-        prods = await db.producers.orderBy('updatedAt').reverse().toArray();
-      }
       setProducers(prods);
 
       const quests = await db.questionnaires.toArray();
@@ -235,7 +238,6 @@ export default function App() {
     setIsReloadingDb(true);
     setDbSuccessMessage(null);
     try {
-      await seedInitialDatabaseIfEmpty(true);
       // Sincronizar con Firebase Firestore para traer datos subidos por técnicos
       try {
         const { syncCloudWithLocal } = await import('./services/firestoreSync');
@@ -257,8 +259,8 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    AuthService.clearSession();
+  const handleLogout = async () => {
+    await AuthService.signOut();
     setCurrentUser(null);
     navigateTo('landing', '/');
   };
@@ -271,7 +273,6 @@ export default function App() {
         onSuccessLogin={(user) => {
           setDeepLinkInviteCode(null);
           setCurrentUser(user);
-          AuthService.setStoredSession(user);
           if (user.role === 'TECNICO') {
             navigateTo('tecnicos-dashboard', '/tecnicos/dashboard');
           } else {
@@ -298,7 +299,7 @@ export default function App() {
           }
         }}
         onNavigateToAdmin={() => {
-          if (currentUser && (currentUser.role === 'ADMINISTRADOR' || currentUser.role === 'SUPERADMIN')) {
+          if (currentUser && ['ADMINISTRADOR', 'SUPERADMIN', 'DIRECTOR', 'SUPERVISOR'].includes(currentUser.role)) {
             navigateTo('admin-dashboard', '/admin/dashboard');
           } else {
             navigateTo('admin-login', '/admin');
@@ -620,6 +621,13 @@ export default function App() {
                   <RefreshCw className={`w-3.5 h-3.5 text-[#27865A] ${isReloadingDb ? 'animate-spin' : ''}`} />
                   <span>{isReloadingDb ? 'Sincronizando datos...' : 'Sincronizar Datos de Campo'}</span>
                 </button>
+
+                <button
+                  onClick={() => setActiveAdminTab('responses')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition ${activeAdminTab === 'responses' ? 'bg-[#E8F2EA] text-[#174C35]' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <FileText className="w-4 h-4" /><span>Respuestas</span>
+                </button>
               </div>
             </div>
 
@@ -652,6 +660,7 @@ export default function App() {
 
             {activeAdminTab === 'producers' && (
               <ProducersList
+                currentUser={activeUser}
                 producers={producers}
                 onRefresh={refreshData}
                 onOpenMapLocation={(p) => {
@@ -779,11 +788,12 @@ export default function App() {
               </div>
             )}
 
+            {activeAdminTab === 'responses' && activeUser && (
+              <QuestionnaireResponsesReview currentUser={activeUser} />
+            )}
+
             {activeAdminTab === 'invitations' && (
-              <InvitationsManager
-                currentUserId={activeUser.id}
-                currentUserName={activeUser.fullName}
-              />
+              <InvitationsManager />
             )}
 
             {activeAdminTab === 'database' && (

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { DynamicQuestionnaire, DynamicQuestion, QuestionType, ProductiveActivityType } from '../../db/schema';
 import { PRODUCTIVE_ACTIVITIES_CATALOG } from '../../db/misionesCatalog';
 import { db } from '../../db/dexieDb';
+import { httpsCallable } from 'firebase/functions';
+import { firebaseFunctions } from '../../services/firebaseClient';
 import { 
   Plus, 
   Trash2, 
@@ -32,7 +34,6 @@ export const QuestionnaireBuilder: React.FC<QuestionnaireBuilderProps> = ({
   const [code, setCode] = useState(existingQuestionnaire?.code || `CUEST-${Date.now().toString().slice(-4)}`);
   const [description, setDescription] = useState(existingQuestionnaire?.description || '');
   const [category, setCategory] = useState<any>(existingQuestionnaire?.category || 'yerba_mate');
-  const [status, setStatus] = useState<'draft' | 'published'>(existingQuestionnaire?.status === 'published' ? 'published' : 'published');
   const [questions, setQuestions] = useState<DynamicQuestion[]>(
     existingQuestionnaire?.questions || [
       {
@@ -84,7 +85,7 @@ export const QuestionnaireBuilder: React.FC<QuestionnaireBuilderProps> = ({
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      const currentVersion = existingQuestionnaire ? existingQuestionnaire.version + 1 : 1;
+      const currentVersion = existingQuestionnaire ? existingQuestionnaire.version : 1;
       
       const questionnaireRecord: DynamicQuestionnaire = {
         id: existingQuestionnaire?.id || `quest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -93,27 +94,34 @@ export const QuestionnaireBuilder: React.FC<QuestionnaireBuilderProps> = ({
         description: description.trim(),
         category,
         version: currentVersion,
-        status: publish ? 'published' : status,
+        status: 'draft',
         questions,
-        publishedAt: publish ? now : existingQuestionnaire?.publishedAt,
+        publishedAt: existingQuestionnaire?.publishedAt,
         createdAt: existingQuestionnaire?.createdAt || now,
         updatedAt: now
       };
 
-      await db.questionnaires.put(questionnaireRecord);
+      let savedRecord = questionnaireRecord;
+      if (publish) {
+        const result = await httpsCallable(firebaseFunctions, 'publishQuestionnaire')({ questionnaire: questionnaireRecord });
+        savedRecord = (result.data as { questionnaire: DynamicQuestionnaire }).questionnaire;
+      } else {
+        await db.questionnaires.put(questionnaireRecord);
+      }
 
       // Notification
       await db.notifications.add({
         id: `notif_${Date.now()}`,
-        title: `Cuestionario Actualizado: ${questionnaireRecord.title}`,
-        message: `Versión ${questionnaireRecord.version} publicada y disponible offline para todos los técnicos de campo.`,
+        title: `Cuestionario Actualizado: ${savedRecord.title}`,
+        message: publish ? `Versión ${savedRecord.version} publicada.` : 'Borrador guardado.',
         type: 'form',
         targetRoles: ['TECNICO', 'SUPERVISOR', 'ADMINISTRADOR', 'DIRECTOR'],
         read: false,
         createdAt: now
       });
 
-      onSuccess(questionnaireRecord);
+      await db.questionnaires.put(savedRecord);
+      onSuccess(savedRecord);
     } catch (e: any) {
       alert(`Error al guardar cuestionario: ${e.message}`);
     } finally {

@@ -13,6 +13,7 @@ export interface UserProfile {
   phone?: string;
   dni: string;
   assignedMunicipalities?: string[];
+  requestedMunicipalities?: string[];
   departmentOrZone?: string;
   active: boolean;
   approvalStatus?: 'approved' | 'pending' | 'rejected';
@@ -69,7 +70,7 @@ export interface ProductiveActivity {
   producerId: string;
   type: ProductiveActivityType;
   title: string;
-  surfaceHa: number;
+  surfaceHa: number | null;
   specificData: Record<string, any>;
   createdAt: string;
 }
@@ -86,7 +87,7 @@ export interface Establishment {
   lat: number;
   lng: number;
   gpsAccuracyMeters?: number;
-  tenureType: 'propiedad_con_titulo' | 'ocupacion_con_permiso' | 'arrendamiento' | 'fiscal_en_tramite' | 'comunitaria';
+  tenureType: 'propiedad_con_titulo' | 'ocupacion_con_permiso' | 'arrendamiento' | 'fiscal_en_tramite' | 'comunitaria' | null;
   createdAt: string;
 }
 
@@ -118,18 +119,19 @@ export interface Producer {
   // Geolocation & Establishment
   establishmentName: string;
   municipality: string;
+  municipalityId?: string;
   colonyParaje: string;
   addressReference: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   gpsAccuracyMeters?: number;
   isGeolocated?: boolean;
   locationMethod?: LocationCaptureMethod;
   locationCapturedAt?: string;
   locationCapturedBy?: string;
   originalLocationInput?: string;
-  tenureType: 'propiedad_con_titulo' | 'ocupacion_con_permiso' | 'arrendamiento' | 'fiscal_en_tramite' | 'comunitaria';
-  surfaceHa: number;
+  tenureType: 'propiedad_con_titulo' | 'ocupacion_con_permiso' | 'arrendamiento' | 'fiscal_en_tramite' | 'comunitaria' | null;
+  surfaceHa: number | null;
 
   // Activities & Infrastructure
   activities: ProductiveActivity[];
@@ -226,6 +228,7 @@ export interface QuestionnaireResponse {
   questionnaireVersion: number;
   questionnaireTitle: string;
   producerId: string;
+  municipalityId: string;
   producerDni: string;
   producerName: string;
   technicianId: string;

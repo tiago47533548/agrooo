@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ProtectedImage } from '../common/ProtectedImage';
 import { Producer, ProductiveActivityType } from '../../db/schema';
 import { PRODUCTIVE_ACTIVITIES_CATALOG, MISIONES_MUNICIPALITIES } from '../../db/misionesCatalog';
 import { db } from '../../db/dexieDb';
@@ -25,6 +26,7 @@ import { compressChacraLogo } from '../../utils/imageCompressor';
 import { resolveProducerConflict, uploadProducerToCloud } from '../../services/firestoreSync';
 
 interface ProducersListProps {
+  currentUser: import('../../db/schema').UserProfile;
   producers: Producer[];
   onRefresh: () => void;
   onOpenMapLocation?: (producer: Producer) => void;
@@ -32,6 +34,7 @@ interface ProducersListProps {
 }
 
 export const ProducersList: React.FC<ProducersListProps> = ({
+  currentUser,
   producers,
   onRefresh,
   onOpenMapLocation,
@@ -146,7 +149,9 @@ export const ProducersList: React.FC<ProducersListProps> = ({
   // Supervisor validation
   const handleToggleValidation = async (producer: Producer) => {
     const updated = !producer.verifiedBySupervisor;
-    await db.producers.update(producer.id, { verifiedBySupervisor: updated });
+    if (currentUser.role !== 'SUPERADMIN' && currentUser.role !== 'ADMINISTRADOR') return;
+    const next = { ...producer, verifiedBySupervisor: updated, updatedAt: new Date().toISOString() };
+    await uploadProducerToCloud(next);
     setSelectedProducerModal((prev) => (prev ? { ...prev, verifiedBySupervisor: updated } : null));
     onRefresh();
   };
@@ -278,7 +283,7 @@ export const ProducersList: React.FC<ProducersListProps> = ({
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         {prod.logoUrl ? (
-                          <img
+                          <ProtectedImage
                             src={prod.logoUrl}
                             alt={prod.establishmentName}
                             className="w-9 h-9 rounded-xl object-cover border border-slate-200 shrink-0 shadow-2xs"
@@ -369,7 +374,7 @@ export const ProducersList: React.FC<ProducersListProps> = ({
               <div className="p-4 bg-emerald-50/60 border border-emerald-200/90 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
                 <div className="flex items-center gap-3.5">
                   {selectedProducerModal.logoUrl ? (
-                    <img
+                    <ProtectedImage
                       src={selectedProducerModal.logoUrl}
                       alt="Logo de la Chacra"
                       className="w-14 h-14 rounded-xl object-cover border border-emerald-300 shadow-2xs shrink-0 bg-white"
@@ -448,7 +453,7 @@ export const ProducersList: React.FC<ProducersListProps> = ({
                   </div>
                 </div>
 
-                <button
+                {(currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMINISTRADOR') && <button
                   onClick={() => handleToggleValidation(selectedProducerModal)}
                   className={`px-3 py-1.5 rounded-xl font-bold text-xs transition ${
                     selectedProducerModal.verifiedBySupervisor
@@ -457,7 +462,7 @@ export const ProducersList: React.FC<ProducersListProps> = ({
                   }`}
                 >
                   {selectedProducerModal.verifiedBySupervisor ? 'Desmarcar' : 'Validar Relevamiento'}
-                </button>
+                </button>}
               </div>
 
               {/* Geo & Land details */}
@@ -476,7 +481,7 @@ export const ProducersList: React.FC<ProducersListProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Tenencia:</span>
-                  <span className="capitalize text-slate-800">{selectedProducerModal.tenureType.replace(/_/g, ' ')}</span>
+                  <span className="capitalize text-slate-800">{selectedProducerModal.tenureType?.replace(/_/g, ' ') || 'No informado'}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Método Georreferencia:</span>
@@ -499,7 +504,7 @@ export const ProducersList: React.FC<ProducersListProps> = ({
                   <span className="text-slate-400 block text-[10px]">Coordenadas Registradas:</span>
                   <span className="font-mono text-slate-800">
                     {selectedProducerModal.isGeolocated !== false ? (
-                      `${selectedProducerModal.lat.toFixed(6)}, ${selectedProducerModal.lng.toFixed(6)} (±${selectedProducerModal.gpsAccuracyMeters || 5}m)`
+                      Number.isFinite(selectedProducerModal.lat) && Number.isFinite(selectedProducerModal.lng) ? `${selectedProducerModal.lat!.toFixed(6)}, ${selectedProducerModal.lng!.toFixed(6)}${selectedProducerModal.gpsAccuracyMeters != null ? ` (±${selectedProducerModal.gpsAccuracyMeters}m)` : ''}` : 'Sin coordenadas registradas'
                     ) : (
                       <span className="text-amber-700 font-sans font-medium">Sin coordenadas precisas asignadas</span>
                     )}
@@ -602,7 +607,7 @@ export const ProducersList: React.FC<ProducersListProps> = ({
                   </h4>
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {selectedProducerModal.photoUrls.map((p, idx) => (
-                      <img
+                      <ProtectedImage
                         key={idx}
                         src={p}
                         alt="Relevamiento"
