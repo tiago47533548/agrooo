@@ -22,7 +22,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { compressChacraLogo } from '../../utils/imageCompressor';
-import { uploadProducerToCloud } from '../../services/firestoreSync';
+import { resolveProducerConflict, uploadProducerToCloud } from '../../services/firestoreSync';
 
 interface ProducersListProps {
   producers: Producer[];
@@ -54,11 +54,10 @@ export const ProducersList: React.FC<ProducersListProps> = ({
         logoUrl: compressed,
         updatedAt: new Date().toISOString()
       };
-      await db.producers.put(updated);
+      await uploadProducerToCloud(updated);
       setSelectedProducerModal(updated);
       onRefresh();
       // Sincronizar en la nube inmediatamente
-      uploadProducerToCloud(updated).catch(() => {});
     } catch (err: any) {
       alert(err?.message || 'Error al actualizar el logo');
     } finally {
@@ -73,10 +72,9 @@ export const ProducersList: React.FC<ProducersListProps> = ({
         logoUrl: '',
         updatedAt: new Date().toISOString()
       };
-      await db.producers.put(updated);
+      await uploadProducerToCloud(updated);
       setSelectedProducerModal(updated);
       onRefresh();
-      uploadProducerToCloud(updated).catch(() => {});
     } catch (err: any) {
       alert(err?.message || 'Error al quitar el logo');
     }
@@ -425,6 +423,17 @@ export const ProducersList: React.FC<ProducersListProps> = ({
                 </div>
               </div>
 
+              {/* Validation Status */}
+              {selectedProducerModal.syncConflict && (
+                <div className="p-4 rounded-2xl border border-orange-300 bg-orange-50 space-y-2">
+                  <strong className="text-orange-900">Conflicto de sincronización</strong>
+                  <p className="text-orange-800">Este productor cambió en otro dispositivo. Elija qué versión conservar.</p>
+                  <div className="flex gap-2">
+                    <button onClick={async () => { await resolveProducerConflict(selectedProducerModal.id, 'cloud'); setSelectedProducerModal(null); onRefresh(); }} className="px-3 py-2 rounded-lg bg-white border border-orange-300 text-orange-900 font-semibold">Usar versión de Firebase</button>
+                    <button onClick={async () => { await resolveProducerConflict(selectedProducerModal.id, 'local'); setSelectedProducerModal(null); onRefresh(); }} className="px-3 py-2 rounded-lg bg-orange-700 text-white font-semibold">Conservar versión local</button>
+                  </div>
+                </div>
+              )}
               {/* Validation Status */}
               <div className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200">
                 <div className="flex items-center gap-2">

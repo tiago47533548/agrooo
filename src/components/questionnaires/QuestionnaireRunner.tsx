@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { DynamicQuestionnaire, Producer, QuestionnaireResponse } from '../../db/schema';
 import { db } from '../../db/dexieDb';
 import { syncEngine } from '../../services/syncEngine';
+import { auth } from '../../services/firestoreSync';
 import { 
   FileText, 
   CheckCircle, 
@@ -89,6 +90,7 @@ export const QuestionnaireRunner: React.FC<QuestionnaireRunnerProps> = ({
         producerDni: selectedProducer.dni,
         producerName: selectedProducer.fullName,
         technicianId,
+        technicianAuthUid: auth.currentUser?.uid,
         technicianName,
         answers,
         status: isDraft ? 'draft' : 'completed',
@@ -99,15 +101,7 @@ export const QuestionnaireRunner: React.FC<QuestionnaireRunnerProps> = ({
       };
 
       // Save to IndexedDB
-      await db.questionnaireResponses.put(responseRecord);
-
-      // Enqueue to syncQueue
-      await syncEngine.enqueue(
-        'questionnaire_responses',
-        'insert',
-        responseRecord.id,
-        responseRecord
-      );
+      await syncEngine.saveAndEnqueue('questionnaireResponses', responseRecord, 'insert');
 
       // Audit log
       await db.auditLogs.add({

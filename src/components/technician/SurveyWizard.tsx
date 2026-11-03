@@ -319,16 +319,8 @@ export const SurveyWizard: React.FC<SurveyWizardProps> = ({
         verifiedBySupervisor: false
       };
 
-      // 1. Save directly in IndexedDB
-      await db.producers.put(completeProducer);
-
-      // 2. Enqueue for offline sync
-      await syncEngine.enqueue(
-        'producers',
-        editProducer ? 'update' : 'insert',
-        completeProducer.id,
-        completeProducer
-      );
+      // Save the local record and its upload operation atomically.
+      await syncEngine.saveAndEnqueue('producers', completeProducer, editProducer ? 'update' : 'insert');
 
       // 3. Log audit event
       await db.auditLogs.add({

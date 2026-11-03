@@ -134,12 +134,10 @@ export async function parseAndImportProducerFile(
           createdByName: row.createdByName || currentUserName,
           verifiedBySupervisor: Boolean(row.verifiedBySupervisor),
           ...row,
-          syncStatus: 'synced',
+          syncStatus: 'pending',
           updatedAt: now
         };
-        await db.producers.put(producer);
-        // Subir a Firestore
-        uploadProducerToCloud(producer).catch(() => {});
+        await uploadProducerToCloud(producer);
         importedProducers.push(producer);
         importedCount++;
         continue;
@@ -239,9 +237,7 @@ export async function parseAndImportProducerFile(
         importSourceFileName: file.name
       };
 
-      await db.producers.put(producer);
-      // Subir a Firestore
-      uploadProducerToCloud(producer).catch(() => {});
+      await uploadProducerToCloud(producer);
 
       if (existing) {
         updatedCount++;

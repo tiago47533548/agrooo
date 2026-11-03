@@ -142,6 +142,8 @@ export interface Producer {
   syncError?: string;
   version: number;
   lastSyncedAt?: string;
+  cloudRevision?: number;
+  syncConflict?: { cloudRecord: Producer; detectedAt: string };
   createdAt: string;
   updatedAt: string;
   createdById: string;
@@ -227,6 +229,7 @@ export interface QuestionnaireResponse {
   producerDni: string;
   producerName: string;
   technicianId: string;
+  technicianAuthUid?: string;
   technicianName: string;
   answers: Record<string, any>;
   status: 'draft' | 'completed' | 'validated' | 'observed';
@@ -234,6 +237,7 @@ export interface QuestionnaireResponse {
   createdAt: string;
   updatedAt: string;
   syncStatus: 'pending' | 'synced' | 'error';
+  cloudRevision?: number;
 }
 
 export interface SyncQueueItem {
@@ -248,6 +252,10 @@ export interface SyncQueueItem {
   error?: string;
   status: 'pending' | 'syncing' | 'synced' | 'failed';
   createdAt: string;
+  nextAttemptAt?: string;
+  errorKind?: 'transient' | 'permission' | 'validation' | 'conflict' | 'unknown';
+  baseRevision?: number;
+  payloadRevision?: string;
 }
 
 export interface AuditLog {

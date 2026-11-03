@@ -22,6 +22,7 @@ import { DatabaseImporter } from './components/admin/DatabaseImporter';
 import { TechniciansManager } from './components/admin/TechniciansManager';
 import { RegisterWithInvitation } from './components/auth/RegisterWithInvitation';
 import { AuthService } from './services/authService';
+import { syncEngine } from './services/syncEngine';
 import { 
   LayoutDashboard, 
   Users, 
@@ -103,7 +104,7 @@ export default function App() {
         const { syncCloudWithLocal, subscribeToCloudProducers } = await import('./services/firestoreSync');
         
         // 1. Sincronización inicial rápida en segundo plano
-        syncCloudWithLocal().then(() => {
+        syncCloudWithLocal().then(() => syncEngine.triggerSync()).then(() => {
           refreshData();
         }).catch((err) => {
           console.warn('Aviso sincronización inicial Firestore:', err);
@@ -238,12 +239,15 @@ export default function App() {
       // Sincronizar con Firebase Firestore para traer datos subidos por técnicos
       try {
         const { syncCloudWithLocal } = await import('./services/firestoreSync');
-        const syncRes = await syncCloudWithLocal();
+        await syncCloudWithLocal();
+        const syncRes = await syncEngine.triggerSync();
         await refreshData();
-        setDbSuccessMessage(`¡Base de datos territorial sincronizada con éxito! Se cargaron los relevamientos de los técnicos (${syncRes.total} productores disponibles).`);
+        setDbSuccessMessage(syncRes.success
+          ? `Sincronización completada: ${syncRes.syncedCount} registros confirmados en Firebase.`
+          : `Sincronización incompleta: ${syncRes.syncedCount} confirmados. ${syncRes.errors[0] || 'Hay registros pendientes de reintento.'}`);
       } catch (cloudErr) {
         await refreshData();
-        setDbSuccessMessage('¡Base de datos territorial cargada exitosamente!');
+        setDbSuccessMessage(`Los datos locales siguen disponibles, pero Firebase no confirmó la sincronización: ${(cloudErr as Error)?.message || 'error de conexión'}`);
       }
       setTimeout(() => setDbSuccessMessage(null), 5000);
     } catch (e: any) {

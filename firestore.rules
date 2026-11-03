@@ -16,6 +16,47 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /questionnaireResponses/{responseId} {
+      allow create: if request.auth != null
+        && request.resource.data.technicianAuthUid == request.auth.uid;
+      allow get: if request.auth != null
+        && (!exists(/databases/$(database)/documents/questionnaireResponses/$(responseId))
+          || resource.data.technicianAuthUid == request.auth.uid
+          || request.auth.token.email in [
+            'tiagorodirguez091@gmail.com',
+            'tiagorodriguez091@gmail.com',
+            'magnoleonrossi@gmail.com',
+            'admin@agro.misiones.gob.ar',
+            'marina.santos@agro.misiones.gob.ar'
+          ]);
+      allow list: if request.auth != null
+        && (resource.data.technicianAuthUid == request.auth.uid
+          || request.auth.token.email in [
+            'tiagorodirguez091@gmail.com',
+            'tiagorodriguez091@gmail.com',
+            'magnoleonrossi@gmail.com',
+            'admin@agro.misiones.gob.ar',
+            'marina.santos@agro.misiones.gob.ar'
+          ]);
+      allow update: if request.auth != null
+        && ((resource.data.technicianAuthUid == request.auth.uid
+              && request.resource.data.technicianAuthUid == request.auth.uid)
+          || request.auth.token.email in [
+            'tiagorodirguez091@gmail.com',
+            'tiagorodriguez091@gmail.com',
+            'magnoleonrossi@gmail.com',
+            'admin@agro.misiones.gob.ar',
+            'marina.santos@agro.misiones.gob.ar'
+          ]);
+      allow delete: if request.auth != null && request.auth.token.email in [
+        'tiagorodirguez091@gmail.com',
+        'tiagorodriguez091@gmail.com',
+        'magnoleonrossi@gmail.com',
+        'admin@agro.misiones.gob.ar',
+        'marina.santos@agro.misiones.gob.ar'
+      ];
+    }
+
     // Resto de colecciones denegadas por defecto
     match /{document=**} {
       allow read, write: if false;

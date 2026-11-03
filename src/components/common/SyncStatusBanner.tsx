@@ -17,7 +17,7 @@ interface SyncStatusBannerProps {
 }
 
 export const SyncStatusBanner: React.FC<SyncStatusBannerProps> = ({ compact = false }) => {
-  const { state, isOnline, pendingCount, lastSyncedAt, errorMessage, supabaseConfigured, triggerSync } = useSyncEngine();
+  const { state, isOnline, pendingCount, failedCount, conflictCount, lastSyncedAt, errorMessage, triggerSync, retryFailed } = useSyncEngine();
   const [isSyncing, setIsSyncing] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
@@ -29,6 +29,11 @@ export const SyncStatusBanner: React.FC<SyncStatusBannerProps> = ({ compact = fa
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const handleRetryFailed = async () => {
+    setIsSyncing(true);
+    try { await retryFailed(); } finally { setIsSyncing(false); }
   };
 
   const getStatusConfig = () => {
@@ -174,11 +179,15 @@ export const SyncStatusBanner: React.FC<SyncStatusBannerProps> = ({ compact = fa
               </div>
 
               <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="text-slate-600 font-medium">Servidor Central Supabase</span>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded ${supabaseConfigured ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
-                  {supabaseConfigured ? 'Conectado a Cloud' : 'Modo Autónomo Local'}
-                </span>
+                <span className="text-slate-600 font-medium">Backend</span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Firebase Firestore</span>
               </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="rounded-lg bg-amber-50 p-2"><b>{pendingCount}</b><span className="block text-slate-500">Pendientes</span></div>
+                <div className="rounded-lg bg-rose-50 p-2"><b>{failedCount}</b><span className="block text-slate-500">Fallidos</span></div>
+                <div className="rounded-lg bg-orange-50 p-2"><b>{conflictCount}</b><span className="block text-slate-500">Conflictos</span></div>
+              </div>
+              {failedCount > 0 && <button onClick={handleRetryFailed} disabled={isSyncing} className="w-full py-2 rounded-lg bg-rose-100 text-rose-800 font-semibold disabled:opacity-50">Reintentar envíos fallidos</button>}
 
               {lastSyncedAt && (
                 <div className="text-xs text-slate-500 text-center">

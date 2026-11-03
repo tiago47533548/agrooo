@@ -22,14 +22,14 @@ import {
 } from 'lucide-react';
 
 export const DatabaseConfigView: React.FC = () => {
-  const { isOnline, supabaseConfigured, state, pendingCount, triggerSync } = useSyncEngine();
+  const { isOnline, failedCount, conflictCount, state, pendingCount, triggerSync, retryFailed } = useSyncEngine();
   const [copiedSql, setCopiedSql] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [queueItems, setQueueItems] = useState<SyncQueueItem[]>([]);
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [localProducerCount, setLocalProducerCount] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'sql' | 'audit' | 'queue' | 'supabase'>('supabase');
+  const [activeTab, setActiveTab] = useState<'sql' | 'audit' | 'queue' | 'firebase'>('firebase');
 
   useEffect(() => {
     const loadAuditAndQueue = async () => {
@@ -57,13 +57,15 @@ export const DatabaseConfigView: React.FC = () => {
       try {
         const { syncCloudWithLocal } = await import('../../services/firestoreSync');
         await syncCloudWithLocal();
+        const result = await triggerSync();
+        if (!result.success) throw new Error(result.errors[0] || 'Hay registros pendientes de envío.');
+        setResetMessage(`Firebase confirmó ${result.syncedCount} envíos. ${await db.producers.count()} productores disponibles.`);
       } catch (cloudErr) {
-        console.warn('Cloud sync in progress', cloudErr);
+        setResetMessage(`Los datos locales siguen disponibles. Firebase no confirmó todos los envíos: ${(cloudErr as Error)?.message || 'error de conexión'}`);
       }
       const updated = await db.producers.count();
       setLocalProducerCount(updated);
-      setResetMessage(`¡Base de datos territorial y nube sincronizadas exitosamente! ${updated} productores disponibles.`);
-      setTimeout(() => setResetMessage(null), 5000);
+      setTimeout(() => setResetMessage(null), 7000);
     } catch (e: any) {
       setResetMessage('Error al sincronizar base: ' + (e?.message || 'Error'));
     } finally {
@@ -95,23 +97,23 @@ export const DatabaseConfigView: React.FC = () => {
       <div>
         <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
           <Database className="w-5 h-5 text-[#27865A]" />
-          <span>Infraestructura Cloud, PostgreSQL & Seguridad</span>
+          <span>Infraestructura de Datos & Seguridad</span>
         </h2>
         <p className="text-xs text-slate-500 mt-0.5">
-          Arquitectura relacional con PostGIS, políticas de seguridad RLS y sincronización offline-first.
+          Firebase Firestore, registro local y cola de sincronización.
         </p>
       </div>
 
       {/* Tabs */}
       <div className="flex items-center gap-1 p-1 bg-slate-200/80 rounded-2xl">
         <button
-          onClick={() => setActiveTab('supabase')}
+          onClick={() => setActiveTab('firebase')}
           className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
-            activeTab === 'supabase' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            activeTab === 'firebase' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <Server className="w-3.5 h-3.5 text-[#27865A]" />
-          <span>Conexión Supabase</span>
+          <span>Conexión Firebase</span>
         </button>
 
         <button
@@ -145,29 +147,25 @@ export const DatabaseConfigView: React.FC = () => {
         </button>
       </div>
 
-      {/* TAB 1: Supabase Configuration & Status */}
-      {activeTab === 'supabase' && (
+      {/* TAB 1: Firebase configuration & status */}
+      {activeTab === 'firebase' && (
         <div className="space-y-4">
           <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-4">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <Server className="w-4 h-4 text-[#27865A]" />
-                  <span>Estado de Integración Backend Supabase</span>
+                  <span>Estado de Integración Backend Firebase</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Conexión directa con base de datos PostgreSQL, autenticación y almacenamiento de fotografías.
+                  Conexión con Firebase Authentication y Firestore.
                 </p>
               </div>
 
               <span
-                className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                  supabaseConfigured
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-amber-100 text-amber-800'
-                }`}
+                className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800"
               >
-                {supabaseConfigured ? 'Conectado a Cloud' : 'Modo Autónomo Local'}
+                Firebase Firestore
               </span>
             </div>
 
@@ -177,18 +175,17 @@ export const DatabaseConfigView: React.FC = () => {
                 <div>
                   <span className="font-bold text-slate-900">Principio de Integración Transparente:</span>
                   <p className="text-slate-600 mt-0.5">
-                    El sistema nunca simula una conexión ficticia a la nube. Si las credenciales no están configuradas en el entorno, opera 100% en modo local de alta fidelidad con IndexedDB, sin pérdidas de datos.
+                    Los registros se guardan localmente y se envían a Firestore cuando hay conexión. Los errores quedan visibles en la cola para reintento.
                   </p>
                 </div>
               </div>
 
               <div className="border-t border-slate-200 pt-3 space-y-2">
                 <span className="font-bold text-slate-800 block text-[11px] uppercase tracking-wider">
-                  Variables de Entorno para Conexión Producción (.env):
+                  Configuración del proyecto Firebase:
                 </span>
                 <div className="bg-slate-900 text-slate-200 p-3 rounded-xl font-mono text-[11px] space-y-1">
-                  <div>VITE_SUPABASE_URL="https://tu-proyecto.supabase.co"</div>
-                  <div>VITE_SUPABASE_ANON_KEY="tu-clave-anonima-publica"</div>
+                  <div>firebase-applet-config.json</div>
                 </div>
               </div>
             </div>
@@ -309,14 +306,12 @@ export const DatabaseConfigView: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <span className="text-xs font-bold text-slate-800">
-              Cola de Operaciones Pendientes en IndexedDB
+              Cola Firebase: {pendingCount} pendientes · {failedCount} fallidos · {conflictCount} conflictos
             </span>
-            <button
-              onClick={() => triggerSync()}
-              className="px-3 py-1 bg-[#27865A] text-white rounded-lg text-xs font-semibold hover:bg-[#174C35] transition"
-            >
-              Procesar Cola Ahora
-            </button>
+            <div className="flex gap-2">
+              {failedCount > 0 && <button onClick={() => retryFailed()} className="px-3 py-1 bg-rose-700 text-white rounded-lg text-xs font-semibold">Reintentar fallidos</button>}
+              <button onClick={() => triggerSync()} className="px-3 py-1 bg-[#27865A] text-white rounded-lg text-xs font-semibold hover:bg-[#174C35] transition">Procesar ahora</button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
