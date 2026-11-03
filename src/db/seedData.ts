@@ -67,6 +67,21 @@ export const INITIAL_USERS: UserProfile[] = [
     updatedAt: '2026-01-12T08:00:00Z'
   },
   {
+    id: 'user-tecnico-prueba',
+    email: 'tecnico.prueba@agro.misiones.gob.ar',
+    fullName: 'Técnico Zonal Acelerados Misiones',
+    role: 'TECNICO',
+    dni: '35194820',
+    phone: '+54 3755 49-3320',
+    assignedMunicipalities: ['obera', 'campo_viera', 'leandro_n_alem', 'san_vicente', 'posadas'],
+    active: true,
+    approvalStatus: 'approved',
+    authProvider: 'password',
+    emailVerified: true,
+    createdAt: '2026-01-12T08:00:00Z',
+    updatedAt: '2026-01-12T08:00:00Z'
+  },
+  {
     id: 'user-superadmin-1',
     email: 'admin@agro.misiones.gob.ar',
     fullName: 'Ing. Carlos Rovira (Superadmin)',

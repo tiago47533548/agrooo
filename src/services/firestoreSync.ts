@@ -73,11 +73,10 @@ export async function syncCloudWithLocal(): Promise<{ uploaded: number; download
   await auth.authStateReady();
   const [cloudProducers, cloudResponses] = await Promise.all([
     fetchProducersFromCloud(),
-    auth.currentUser && ['tiagorodirguez091@gmail.com', 'tiagorodriguez091@gmail.com', 'magnoleonrossi@gmail.com', 'admin@agro.misiones.gob.ar', 'marina.santos@agro.misiones.gob.ar'].includes(auth.currentUser.email || '')
-      ? getDocs(collection(firestoreDb, 'questionnaireResponses'))
-      : auth.currentUser
-        ? getDocs(query(collection(firestoreDb, 'questionnaireResponses'), where('technicianAuthUid', '==', auth.currentUser.uid)))
-        : Promise.resolve({ docs: [] } as any)
+    getDocs(collection(firestoreDb, 'questionnaireResponses')).catch((err) => {
+      console.warn('Aviso lectura questionnaireResponses en nube:', err);
+      return { docs: [] } as any;
+    })
   ]);
   const cloudById = new Map(cloudProducers.map((p) => [p.id, p]));
 

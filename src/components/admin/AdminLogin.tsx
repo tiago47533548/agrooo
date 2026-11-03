@@ -6,10 +6,15 @@ import {
   ShieldAlert, 
   Lock, 
   Loader2,
-  CheckCircle2,
-  AlertTriangle
+  Key,
+  User,
+  Eye,
+  EyeOff,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 import { GoogleAuthService } from '../../services/googleAuth';
+import { AuthService } from '../../services/authService';
 import { UserProfile } from '../../db/schema';
 
 interface AdminLoginProps {
@@ -21,11 +26,57 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
   onBackToLanding,
   onLoginSuccess
 }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'credentials' | 'google'>('credentials');
+  const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
+  const [isSubmittingCredentials, setIsSubmittingCredentials] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Form states
+  const [adminUserInput, setAdminUserInput] = useState('tiagorodriguez091@gmail.com');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('Admin2026!');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleCredentialsLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSubmittingCredentials(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await AuthService.loginWithCredentials(adminUserInput, adminPasswordInput);
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+      } else {
+        setErrorMessage(res.error || 'Credenciales de administrador no válidas.');
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error al validar credenciales');
+    } finally {
+      setIsSubmittingCredentials(false);
+    }
+  };
+
+  const handleOneClickAdminLogin = async () => {
+    setAdminUserInput('tiagorodriguez091@gmail.com');
+    setAdminPasswordInput('Admin2026!');
+    setIsSubmittingCredentials(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await AuthService.loginWithCredentials('tiagorodriguez091@gmail.com', 'Admin2026!');
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+      } else {
+        setErrorMessage(res.error || 'Error al iniciar sesión administrativa');
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error al conectar perfil administrativo');
+    } finally {
+      setIsSubmittingCredentials(false);
+    }
+  };
+
   const handleGoogleLogin = async () => {
-    setIsLoading(true);
+    setIsLoadingGoogle(true);
     setErrorMessage(null);
 
     try {
@@ -38,7 +89,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
     } catch (e: any) {
       setErrorMessage(e?.message || 'Error al conectar con los servicios de autenticación de Google.');
     } finally {
-      setIsLoading(false);
+      setIsLoadingGoogle(false);
     }
   };
 
@@ -81,7 +132,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
           </div>
 
           {/* Form and Actions */}
-          <div className="p-6 sm:p-7 space-y-6">
+          <div className="p-6 sm:p-7 space-y-5">
             {errorMessage && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 text-red-900 text-xs animate-in fade-in">
                 <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
@@ -92,55 +143,163 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               </div>
             )}
 
-            {/* Google Primary CTA Button */}
-            <div className="space-y-4">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
-                Ingreso oficial con identidad verificada
-              </span>
-
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={isLoading}
-                className="w-full py-4 px-5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm rounded-2xl shadow-sm transition active:scale-[0.98] cursor-pointer flex items-center justify-center gap-3 min-h-[52px]"
-              >
-                {isLoading ? (
-                  <div className="flex items-center gap-2 text-white font-bold">
-                    <Loader2 className="w-5 h-5 animate-spin text-[#E9A23B]" />
-                    <span>Conectando con Google...</span>
-                  </div>
-                ) : (
-                  <>
-                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.28-2.1 3.66-5.2 3.66-9.12z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.27v3.13C3.25 21.31 7.31 24 12 24z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.28 14.28c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28V6.59H1.27C.46 8.21 0 10.05 0 12s.46 3.79 1.27 5.41l4.01-3.13z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.69 1.27 6.59l4.01 3.13c.95-2.84 3.6-4.97 6.72-4.97z"
-                      />
-                    </svg>
-                    <span>Continuar con Google</span>
-                  </>
-                )}
-              </button>
-
-              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-start gap-2.5 text-xs text-slate-600">
-                <Lock className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                <span className="text-[11px] leading-relaxed">
-                  Autenticación oficial con contraseña y 2FA de Google. Nadie puede acceder sin verificar la propiedad de su cuenta en los servidores de Google.
+            {/* Admin Fast Test Access Badge */}
+            <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Acceso de Prueba Administrador</span>
+                </span>
+                <span className="text-[10px] bg-amber-200/70 text-amber-950 px-2 py-0.5 rounded-full">
+                  Tiago Rodríguez
                 </span>
               </div>
+              <p className="text-[11px] text-amber-800">
+                Usuario: <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-200">tiagorodriguez091@gmail.com</code> | Clave: <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-200">Admin2026!</code>
+              </p>
+              <button
+                type="button"
+                onClick={handleOneClickAdminLogin}
+                disabled={isSubmittingCredentials}
+                className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isSubmittingCredentials ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                <span>Ingresar como Administrador (1 clic)</span>
+              </button>
             </div>
+
+            {/* Tab switch between Credentials & Google */}
+            <div className="flex p-1 bg-slate-100 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setActiveTab('credentials')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeTab === 'credentials'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span>Credenciales</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('google')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeTab === 'google'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.28-2.1 3.66-5.2 3.66-9.12z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.27v3.13C3.25 21.31 7.31 24 12 24z" />
+                  <path fill="#FBBC05" d="M5.28 14.28c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28V6.59H1.27C.46 8.21 0 10.05 0 12s.46 3.79 1.27 5.41l4.01-3.13z" />
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.69 1.27 6.59l4.01 3.13c.95-2.84 3.6-4.97 6.72-4.97z" />
+                </svg>
+                <span>Google OAuth</span>
+              </button>
+            </div>
+
+            {/* Tab 1: Credentials Form */}
+            {activeTab === 'credentials' && (
+              <form onSubmit={handleCredentialsLogin} className="space-y-3.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Correo Autorizado
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      required
+                      value={adminUserInput}
+                      onChange={(e) => setAdminUserInput(e.target.value)}
+                      placeholder="tiagorodriguez091@gmail.com"
+                      className="w-full pl-10 pr-4 py-3 bg-slate-50 focus:bg-white border border-slate-200 focus:border-slate-900 rounded-xl text-xs text-slate-900 font-medium transition focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Contraseña
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={adminPasswordInput}
+                      onChange={(e) => setAdminPasswordInput(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full pl-10 pr-10 py-3 bg-slate-50 focus:bg-white border border-slate-200 focus:border-slate-900 rounded-xl text-xs text-slate-900 font-medium transition focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingCredentials}
+                  className="w-full py-3.5 px-5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm rounded-xl shadow-xs transition active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 min-h-[48px]"
+                >
+                  {isSubmittingCredentials ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Ingresando...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <span>Ingresar al Panel de Supervisión</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* Tab 2: Google Sign In */}
+            {activeTab === 'google' && (
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  disabled={isLoadingGoogle}
+                  className="w-full py-3.5 px-5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm rounded-2xl shadow-sm transition active:scale-[0.98] cursor-pointer flex items-center justify-center gap-3 min-h-[50px]"
+                >
+                  {isLoadingGoogle ? (
+                    <div className="flex items-center gap-2 text-white font-bold">
+                      <Loader2 className="w-5 h-5 animate-spin text-[#E9A23B]" />
+                      <span>Conectando con Google...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.28-2.1 3.66-5.2 3.66-9.12z" />
+                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.27v3.13C3.25 21.31 7.31 24 12 24z" />
+                        <path fill="#FBBC05" d="M5.28 14.28c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28V6.59H1.27C.46 8.21 0 10.05 0 12s.46 3.79 1.27 5.41l4.01-3.13z" />
+                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.69 1.27 6.59l4.01 3.13c.95-2.84 3.6-4.97 6.72-4.97z" />
+                      </svg>
+                      <span>Continuar con Google</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-start gap-2.5 text-xs text-slate-600">
+                  <Lock className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                  <span className="text-[11px] leading-relaxed">
+                    Autenticación oficial con cuenta Google ministerial verificada.
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Security Notice */}
             <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-500 space-y-1">
@@ -148,7 +307,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                 Control de Acceso Institucional (RBAC)
               </span>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                El acceso está reservado exclusivamente a las cuentas autorizadas por la Dirección Provincial. Cualquier intento de inicio de sesión no autorizado es rechazado y registrado para auditoría.
+                El acceso está reservado a funcionarios de la Dirección Provincial y técnicos zonales autorizados.
               </p>
             </div>
           </div>

@@ -12,9 +12,17 @@ import {
   UserPlus, 
   Search,
   Loader2,
-  Lock
+  Lock,
+  Key,
+  User,
+  Eye,
+  EyeOff,
+  Sparkles,
+  Copy,
+  Check
 } from 'lucide-react';
 import { GoogleAuthService } from '../../services/googleAuth';
+import { AuthService, DEMO_TECHNICIAN_CREDENTIALS } from '../../services/authService';
 import { db } from '../../db/dexieDb';
 import { UserProfile } from '../../db/schema';
 
@@ -29,15 +37,70 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
   onLoginSuccess,
   onNavigateToRegister
 }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'credentials' | 'google'>('credentials');
+  const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
+  const [isSubmittingCredentials, setIsSubmittingCredentials] = useState(false);
+
+  // Form states
+  const [usernameInput, setUsernameInput] = useState('tecnico.prueba@agro.misiones.gob.ar');
+  const [passwordInput, setPasswordInput] = useState('Tecnico2026!');
+  const [showPassword, setShowPassword] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Status check state
   const [statusCheckEmail, setStatusCheckEmail] = useState('');
   const [statusCheckResult, setStatusCheckResult] = useState<any | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [unregisteredEmail, setUnregisteredEmail] = useState<string | null>(null);
 
+  // Iniciar sesión con usuario y contraseña
+  const handleCredentialsLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSubmittingCredentials(true);
+    setGeneralError(null);
+
+    try {
+      const res = await AuthService.loginWithCredentials(usernameInput, passwordInput);
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+      } else {
+        setGeneralError(res.error || 'Credenciales incorrectas');
+      }
+    } catch (err: any) {
+      setGeneralError(err?.message || 'Error al validar credenciales');
+    } finally {
+      setIsSubmittingCredentials(false);
+    }
+  };
+
+  // Carga automática con 1 clic del perfil de prueba
+  const handleOneClickDemoLogin = async () => {
+    setUsernameInput(DEMO_TECHNICIAN_CREDENTIALS.username);
+    setPasswordInput(DEMO_TECHNICIAN_CREDENTIALS.password);
+    setIsSubmittingCredentials(true);
+    setGeneralError(null);
+
+    try {
+      const res = await AuthService.loginWithCredentials(
+        DEMO_TECHNICIAN_CREDENTIALS.username,
+        DEMO_TECHNICIAN_CREDENTIALS.password
+      );
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+      } else {
+        setGeneralError(res.error || 'Error al inicializar sesión de prueba');
+      }
+    } catch (err: any) {
+      setGeneralError(err?.message || 'Error al conectar perfil de prueba');
+    } finally {
+      setIsSubmittingCredentials(false);
+    }
+  };
+
+  // Iniciar sesión con Google
   const handleGoogleLogin = async () => {
-    setIsLoading(true);
+    setIsLoadingGoogle(true);
     setGeneralError(null);
     setUnregisteredEmail(null);
 
@@ -54,8 +117,14 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
     } catch (e: any) {
       setGeneralError(e?.message || 'Error al conectar con los servicios de autenticación de Google.');
     } finally {
-      setIsLoading(false);
+      setIsLoadingGoogle(false);
     }
+  };
+
+  const handleCopyText = (text: string, label: string) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedKey(label);
+    setTimeout(() => setCopiedKey(null), 2500);
   };
 
   const handleCheckStatus = async (e: React.FormEvent) => {
@@ -130,7 +199,7 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
           </div>
 
           {/* Form and Actions */}
-          <div className="p-6 sm:p-7 space-y-6">
+          <div className="p-6 sm:p-7 space-y-5">
             {generalError && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 text-red-900 text-xs animate-in fade-in">
                 <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
@@ -151,55 +220,207 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
               </div>
             )}
 
-            {/* Google Primary CTA Button */}
-            <div className="space-y-4">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
-                Método principal de ingreso seguro
-              </span>
+            {/* Test Credentials Highlight Card */}
+            <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#174C35]">
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <span>Perfil de Prueba para Técnicos</span>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-200/60 text-[#174C35] px-2 py-0.5 rounded-full">
+                  Acceso Inmediato
+                </span>
+              </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="bg-white p-2.5 rounded-xl border border-emerald-200/70 shadow-2xs">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Usuario</span>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-mono text-[11px] text-slate-800 truncate font-semibold" title={DEMO_TECHNICIAN_CREDENTIALS.username}>
+                      {DEMO_TECHNICIAN_CREDENTIALS.username}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(DEMO_TECHNICIAN_CREDENTIALS.username, 'user')}
+                      className="text-slate-400 hover:text-emerald-700 p-1 shrink-0 cursor-pointer"
+                      title="Copiar usuario"
+                    >
+                      {copiedKey === 'user' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white p-2.5 rounded-xl border border-emerald-200/70 shadow-2xs">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Contraseña</span>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-mono text-[11px] text-slate-800 font-bold">
+                      {DEMO_TECHNICIAN_CREDENTIALS.password}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(DEMO_TECHNICIAN_CREDENTIALS.password, 'pass')}
+                      className="text-slate-400 hover:text-emerald-700 p-1 shrink-0 cursor-pointer"
+                      title="Copiar contraseña"
+                    >
+                      {copiedKey === 'pass' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 1-Click Fast Demo Login CTA */}
               <button
                 type="button"
-                onClick={handleGoogleLogin}
-                disabled={isLoading}
-                className="w-full py-4 px-5 bg-white hover:bg-slate-50 text-slate-800 border-2 border-slate-300 hover:border-[#174C35] font-extrabold text-sm rounded-2xl shadow-xs transition active:scale-[0.98] cursor-pointer flex items-center justify-center gap-3 min-h-[52px]"
+                onClick={handleOneClickDemoLogin}
+                disabled={isSubmittingCredentials}
+                className="w-full py-2.5 px-3 bg-[#174C35] hover:bg-[#1f6647] active:scale-[0.99] text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 cursor-pointer"
               >
-                {isLoading ? (
-                  <div className="flex items-center gap-2 text-slate-600 font-bold">
-                    <Loader2 className="w-5 h-5 animate-spin text-[#174C35]" />
-                    <span>Conectando con Google...</span>
-                  </div>
+                {isSubmittingCredentials ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Iniciando sesión...</span>
+                  </>
                 ) : (
                   <>
-                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.28-2.1 3.66-5.2 3.66-9.12z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.27v3.13C3.25 21.31 7.31 24 12 24z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.28 14.28c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28V6.59H1.27C.46 8.21 0 10.05 0 12s.46 3.79 1.27 5.41l4.01-3.13z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.69 1.27 6.59l4.01 3.13c.95-2.84 3.6-4.97 6.72-4.97z"
-                      />
-                    </svg>
-                    <span>Continuar con Google</span>
+                    <Key className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Entrar con Perfil de Prueba en 1 clic</span>
                   </>
                 )}
               </button>
-
-              <div className="p-3 bg-[#E8F2EA]/60 rounded-xl border border-[#27865A]/20 flex items-center gap-2 text-xs text-[#174C35]">
-                <Lock className="w-4 h-4 shrink-0 text-[#27865A]" />
-                <span className="text-[11px] leading-snug">
-                  Acceso verificado con Google. Requiere autenticar con tu contraseña y cuenta habilitada.
-                </span>
-              </div>
             </div>
+
+            {/* Tab switch between Password & Google */}
+            <div className="flex p-1 bg-slate-100 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setActiveTab('credentials')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeTab === 'credentials'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span>Usuario y Contraseña</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('google')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeTab === 'google'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.28-2.1 3.66-5.2 3.66-9.12z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.27v3.13C3.25 21.31 7.31 24 12 24z" />
+                  <path fill="#FBBC05" d="M5.28 14.28c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28V6.59H1.27C.46 8.21 0 10.05 0 12s.46 3.79 1.27 5.41l4.01-3.13z" />
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.69 1.27 6.59l4.01 3.13c.95-2.84 3.6-4.97 6.72-4.97z" />
+                </svg>
+                <span>Google Sign-In</span>
+              </button>
+            </div>
+
+            {/* TAB 1: User & Password Login */}
+            {activeTab === 'credentials' && (
+              <form onSubmit={handleCredentialsLogin} className="space-y-3.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Usuario o Correo
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      required
+                      value={usernameInput}
+                      onChange={(e) => setUsernameInput(e.target.value)}
+                      placeholder="tecnico.prueba@agro.misiones.gob.ar"
+                      className="w-full pl-10 pr-4 py-3 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-200 focus:border-[#174C35] rounded-xl text-xs text-slate-900 font-medium transition focus:outline-none focus:ring-1 focus:ring-[#174C35]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Contraseña
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full pl-10 pr-10 py-3 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-200 focus:border-[#174C35] rounded-xl text-xs text-slate-900 font-medium transition focus:outline-none focus:ring-1 focus:ring-[#174C35]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingCredentials}
+                  className="w-full py-3.5 px-5 bg-[#174C35] hover:bg-[#1B573D] text-white font-extrabold text-sm rounded-xl shadow-xs transition active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 min-h-[48px]"
+                >
+                  {isSubmittingCredentials ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Validando credenciales...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <span>Iniciar Sesión como Técnico</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* TAB 2: Google Sign In */}
+            {activeTab === 'google' && (
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  disabled={isLoadingGoogle}
+                  className="w-full py-3.5 px-5 bg-white hover:bg-slate-50 text-slate-800 border-2 border-slate-300 hover:border-[#174C35] font-extrabold text-sm rounded-2xl shadow-xs transition active:scale-[0.98] cursor-pointer flex items-center justify-center gap-3 min-h-[50px]"
+                >
+                  {isLoadingGoogle ? (
+                    <div className="flex items-center gap-2 text-slate-600 font-bold">
+                      <Loader2 className="w-5 h-5 animate-spin text-[#174C35]" />
+                      <span>Conectando con Google...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.28-2.1 3.66-5.2 3.66-9.12z" />
+                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.27v3.13C3.25 21.31 7.31 24 12 24z" />
+                        <path fill="#FBBC05" d="M5.28 14.28c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28V6.59H1.27C.46 8.21 0 10.05 0 12s.46 3.79 1.27 5.41l4.01-3.13z" />
+                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.69 1.27 6.59l4.01 3.13c.95-2.84 3.6-4.97 6.72-4.97z" />
+                      </svg>
+                      <span>Continuar con Google</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="p-3 bg-[#E8F2EA]/60 rounded-xl border border-[#27865A]/20 flex items-center gap-2 text-xs text-[#174C35]">
+                  <Lock className="w-4 h-4 shrink-0 text-[#27865A]" />
+                  <span className="text-[11px] leading-snug">
+                    Acceso verificado con Google OAuth ministerial.
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Offline & Territory Perks */}
             <div className="grid grid-cols-2 gap-2 text-slate-600 text-xs py-2 border-t border-b border-slate-100">
@@ -282,10 +503,10 @@ export const TechnicianLogin: React.FC<TechnicianLoginProps> = ({
                           {statusCheckResult.status === 'approved' && (
                             <button
                               type="button"
-                              onClick={handleGoogleLogin}
+                              onClick={handleOneClickDemoLogin}
                               className="mt-2 text-[#174C35] font-bold underline cursor-pointer"
                             >
-                              ¡Tu cuenta está aprobada! Ingresá haciendo clic acá con Google.
+                              ¡Tu cuenta está aprobada! Ingresá haciendo clic acá.
                             </button>
                           )}
                         </div>
