@@ -20,11 +20,13 @@ import {
 interface LandingPageProps {
   onNavigateToTechnicians: () => void;
   onNavigateToAdmin: () => void;
+  onOpenDocumentation?: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   onNavigateToTechnicians,
-  onNavigateToAdmin
+  onNavigateToAdmin,
+  onOpenDocumentation
 }) => {
   const scrollToAccess = () => {
     const el = document.getElementById('seccion-accesos');
@@ -59,24 +61,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
 
           {/* Navegación y CTA */}
-          <nav className="flex items-center gap-2 sm:gap-4">
+          <nav className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={scrollToObjectives}
-              className="hidden sm:inline-flex text-xs font-semibold text-slate-600 hover:text-[#174C35] transition px-2 py-1"
+              className="hidden sm:inline-flex text-xs font-semibold text-slate-600 hover:text-[#174C35] transition px-2 py-1 cursor-pointer"
             >
               Objetivos
             </button>
             <button
               onClick={scrollToAccess}
-              className="text-xs font-semibold text-slate-600 hover:text-[#174C35] transition px-2 py-1"
+              className="text-xs font-semibold text-slate-600 hover:text-[#174C35] transition px-2 py-1 cursor-pointer"
             >
               Accesos
             </button>
+            {onOpenDocumentation && (
+              <button
+                onClick={onOpenDocumentation}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#174C35]/30 bg-[#E8F2EA] hover:bg-[#d8ebd9] text-[#174C35] text-xs font-extrabold transition cursor-pointer"
+                title="Ver informe técnico e institucional del sistema"
+              >
+                <FileText className="w-3.5 h-3.5 text-[#27865A]" />
+                <span className="hidden xs:inline">Informe Oficial</span>
+              </button>
+            )}
             <button
               onClick={scrollToAccess}
               className="px-4 py-2 bg-[#174C35] hover:bg-[#27865A] text-white font-bold text-xs rounded-xl shadow-xs transition active:scale-[0.98] cursor-pointer min-h-[40px] flex items-center gap-1.5"
             >
-              <span>Ingresar al Sistema</span>
+              <span>Ingresar</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </nav>
@@ -374,7 +386,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px]">
+          <div className="flex items-center gap-3 text-[11px] flex-wrap justify-center sm:justify-end">
+            {onOpenDocumentation && (
+              <button
+                onClick={onOpenDocumentation}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg transition flex items-center gap-1 cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Informe Oficial (PDF)</span>
+              </button>
+            )}
             <span>SIP Misiones v2.4</span>
             <span>·</span>
             <span>Plataforma PWA Offline-First</span>

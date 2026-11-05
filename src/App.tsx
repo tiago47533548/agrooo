@@ -21,6 +21,7 @@ import { DatabaseConfigView } from './components/admin/DatabaseConfigView';
 import { DatabaseImporter } from './components/admin/DatabaseImporter';
 import { TechniciansManager } from './components/admin/TechniciansManager';
 import { RegisterWithInvitation } from './components/auth/RegisterWithInvitation';
+import { SystemDocumentationModal } from './components/docs/SystemDocumentationModal';
 import { AuthService } from './services/authService';
 import { syncEngine } from './services/syncEngine';
 import { 
@@ -81,6 +82,7 @@ export default function App() {
   const [routeAccessNotice, setRouteAccessNotice] = useState<string | null>(null);
   const [isReloadingDb, setIsReloadingDb] = useState(false);
   const [dbSuccessMessage, setDbSuccessMessage] = useState<string | null>(null);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
 
   // Initialize DB, Seed Data, and Session/Routes with Firestore Real-time Cloud Sync
   useEffect(() => {
@@ -378,10 +380,17 @@ export default function App() {
       );
     }
     return (
-      <LandingPage
-        onNavigateToTechnicians={() => navigateTo('tecnicos-login', '/tecnicos')}
-        onNavigateToAdmin={() => navigateTo('admin-login', '/admin')}
-      />
+      <>
+        <LandingPage
+          onNavigateToTechnicians={() => navigateTo('tecnicos-login', '/tecnicos')}
+          onNavigateToAdmin={() => navigateTo('admin-login', '/admin')}
+          onOpenDocumentation={() => setIsDocModalOpen(true)}
+        />
+        <SystemDocumentationModal
+          isOpen={isDocModalOpen}
+          onClose={() => setIsDocModalOpen(false)}
+        />
+      </>
     );
   }
 
@@ -423,6 +432,16 @@ export default function App() {
               <span>Ver Landing</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setIsDocModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 hover:border-slate-300 bg-white text-slate-700 text-xs font-semibold transition cursor-pointer shadow-2xs hover:bg-slate-50"
+            title="Ver informe técnico e institucional del sistema"
+          >
+            <FileText className="w-3.5 h-3.5 text-[#27865A]" />
+            <span className="hidden sm:inline">Informe Oficial</span>
+          </button>
 
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 text-slate-700 text-xs font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -606,6 +625,16 @@ export default function App() {
               >
                 <Database className="w-4 h-4" />
                 <span>Base de Datos</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl transition flex items-center gap-2 whitespace-nowrap shrink-0 text-slate-700 hover:text-[#174C35] hover:bg-emerald-50 border border-slate-200 bg-white font-bold cursor-pointer"
+                title="Abrir informe técnico e institucional del sistema (imprimir / descargar PDF)"
+              >
+                <FileText className="w-4 h-4 text-[#E9A23B]" />
+                <span>Informe Técnico Oficial</span>
               </button>
 
               {/* Action to synchronize/upload all technician field data */}
@@ -877,13 +906,26 @@ export default function App() {
             <span>·</span>
             <span>Ministerio del Agro y la Producción de la Provincia de Misiones</span>
           </div>
-          <div className="flex items-center gap-4 text-slate-400 font-mono text-[11px]">
+          <div className="flex items-center gap-4 text-slate-400 font-mono text-[11px] flex-wrap justify-center sm:justify-end">
+            <button
+              onClick={() => setIsDocModalOpen(true)}
+              className="text-[#174C35] hover:text-[#27865A] font-bold flex items-center gap-1 cursor-pointer transition font-sans text-xs bg-[#E8F2EA] px-2.5 py-1 rounded-lg border border-[#174C35]/20"
+            >
+              <FileText className="w-3.5 h-3.5 text-[#27865A]" />
+              <span>Informe Oficial del Sistema</span>
+            </button>
             <span>Arquitectura Offline-First</span>
             <span>·</span>
-            <span>IndexedDB + PostgreSQL/PostGIS</span>
+            <span>IndexedDB + Firestore</span>
           </div>
         </div>
       </footer>
+
+      {/* System Documentation & Technical Institutional Report Modal */}
+      <SystemDocumentationModal
+        isOpen={isDocModalOpen}
+        onClose={() => setIsDocModalOpen(false)}
+      />
     </div>
   );
 }
