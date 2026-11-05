@@ -8,7 +8,7 @@ import firebaseConfig from './firebaseConfig';
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const firebaseAuth = getAuth(firebaseApp);
 export const firebaseDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-export const firebaseFunctions = getFunctions(firebaseApp);
+export const firebaseFunctions = getFunctions(firebaseApp, 'us-central1');
 export const firebaseStorage = getStorage(firebaseApp);
 
 if (import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true') {

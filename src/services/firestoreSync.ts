@@ -139,12 +139,21 @@ export async function fetchProducersFromCloud(): Promise<Producer[]> {
   if (account.active !== true || account.approvalStatus !== 'approved') return [];
   const base = collection(firestoreDb, 'producers');
   const privileged = ['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR'].includes(account.role);
-  const municipalities = Array.isArray(account.assignedMunicipalities) ? account.assignedMunicipalities.slice(0, 10) : [];
+  // Firestore `in` queries accept at most 30 values. Split larger assignments
+  // into bounded queries so a user's allowed municipalities are not silently
+  // omitted from downloads.
+  const municipalities = Array.isArray(account.assignedMunicipalities) ? account.assignedMunicipalities : [];
   if (!privileged && municipalities.length === 0) return [];
-  const snap = privileged
-    ? await getDocs(base)
-    : await getDocs(query(base, where('municipalityId', 'in', municipalities)));
-  return snap.docs.map((item) => ({ ...item.data(), syncStatus: 'synced' } as Producer));
+  if (privileged) {
+    const snap = await getDocs(base);
+    return snap.docs.map((item) => ({ ...item.data(), syncStatus: 'synced' } as Producer));
+  }
+  const chunks: string[][] = [];
+  for (let index = 0; index < municipalities.length; index += 30) chunks.push(municipalities.slice(index, index + 30));
+  const snapshots = await Promise.all(chunks.map((chunk) => getDocs(query(base, where('municipalityId', 'in', chunk)))));
+  const unique = new Map<string, Producer>();
+  for (const snapshot of snapshots) for (const item of snapshot.docs) unique.set(item.id, { ...item.data(), syncStatus: 'synced' } as Producer);
+  return [...unique.values()];
 }
 
 export async function syncCloudWithLocal(): Promise<{ uploaded: number; downloaded: number; total: number; errors: number }> {
@@ -156,16 +165,18 @@ export async function syncCloudWithLocal(): Promise<{ uploaded: number; download
   const profile = currentUser ? await getDoc(doc(firestoreDb, 'users', currentUser.uid)) : null;
   const account = profile?.data();
   const privileged = account && ['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR'].includes(account.role);
-  const municipalities = Array.isArray(account?.assignedMunicipalities) ? account!.assignedMunicipalities.slice(0, 10) : [];
+  const municipalities = Array.isArray(account?.assignedMunicipalities) ? account!.assignedMunicipalities : [];
   let responseQuerySucceeded = false;
   const responsePromise = currentUser && account?.active === true && account?.approvalStatus === 'approved'
       ? privileged
         ? getDocs(collection(firestoreDb, 'questionnaireResponses'))
-        : account?.role === 'TECNICO'
-          ? municipalities.length ? getDocs(query(collection(firestoreDb, 'questionnaireResponses'), where('technicianAuthUid', '==', currentUser.uid), where('municipalityId', 'in', municipalities))) : Promise.resolve({ docs: [] } as any)
-          : municipalities.length
-            ? getDocs(query(collection(firestoreDb, 'questionnaireResponses'), where('municipalityId', 'in', municipalities)))
-            : Promise.resolve({ docs: [] } as any)
+        : municipalities.length
+          ? Promise.all(Array.from({ length: Math.ceil(municipalities.length / 30) }, (_, index) => municipalities.slice(index * 30, (index + 1) * 30)).map((chunk) =>
+              account?.role === 'TECNICO'
+                ? getDocs(query(collection(firestoreDb, 'questionnaireResponses'), where('technicianAuthUid', '==', currentUser.uid), where('municipalityId', 'in', chunk)))
+                : getDocs(query(collection(firestoreDb, 'questionnaireResponses'), where('municipalityId', 'in', chunk)))
+            )).then((snapshots) => ({ docs: snapshots.flatMap((snapshot) => snapshot.docs) }))
+          : Promise.resolve({ docs: [] } as any)
       : Promise.resolve({ docs: [] } as any)
   const safeResponsePromise = responsePromise.then((result) => { responseQuerySucceeded = true; return result; }).catch((err) => {
       console.warn('Aviso lectura questionnaireResponses en nube:', err);
@@ -274,13 +285,19 @@ export function subscribeToCloudProducers(onUpdate: (producers: Producer[]) => v
     if (disposed || !profile.exists()) return;
     const account = profile.data();
     if (account.active !== true || account.approvalStatus !== 'approved') return;
-    const municipalities = Array.isArray(account.assignedMunicipalities) ? account.assignedMunicipalities.slice(0, 10) : [];
-    const source = ['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR'].includes(account.role)
-      ? collection(firestoreDb, 'producers')
-      : municipalities.length ? query(collection(firestoreDb, 'producers'), where('municipalityId', 'in', municipalities)) : null;
-    if (!source || disposed) return;
-    unsubscribe = onSnapshot(source, (snapshot) => {
-    const list = snapshot.docs.map((item) => ({ ...item.data(), syncStatus: 'synced' } as Producer));
+    const municipalities = Array.isArray(account.assignedMunicipalities) ? account.assignedMunicipalities : [];
+    const privileged = ['SUPERADMIN', 'ADMINISTRADOR', 'DIRECTOR'].includes(account.role);
+    const sources = privileged
+      ? [collection(firestoreDb, 'producers')]
+      : Array.from({ length: Math.ceil(municipalities.length / 30) }, (_, index) => municipalities.slice(index * 30, (index + 1) * 30))
+        .map((chunk) => query(collection(firestoreDb, 'producers'), where('municipalityId', 'in', chunk)));
+    if (!sources.length || disposed) return;
+    const snapshots = new Map<number, any>();
+    const stops = sources.map((source, index) => onSnapshot(source, (snapshot) => {
+    snapshots.set(index, snapshot);
+    const byId = new Map<string, Producer>();
+    for (const current of snapshots.values()) for (const item of current.docs) byId.set(item.id, { ...item.data(), syncStatus: 'synced' } as Producer);
+    const list = [...byId.values()];
     void (async () => {
       for (const cloud of list) {
         const local = await db.producers.get(cloud.id);
@@ -295,7 +312,8 @@ export function subscribeToCloudProducers(onUpdate: (producers: Producer[]) => v
       }
       onUpdate(list);
     })().catch((error) => console.warn('No se pudieron aplicar cambios de Firestore:', error));
-    }, (error) => console.warn('Listener Firestore:', error));
+    }, (error) => console.warn('Listener Firestore:', error)));
+    unsubscribe = () => stops.forEach((stop) => stop());
   }).catch((error) => console.warn('Listener Firestore:', error));
   return () => { disposed = true; unsubscribe?.(); };
 }
